@@ -214,6 +214,114 @@ def spectral_weight_from_matrix(h: np.ndarray, dh: np.ndarray, mu: float, omega_
     return spectral
 
 
+def mean_level_spacing_ratio(evals: np.ndarray) -> float:
+    """Return the mean adjacent-level spacing ratio r."""
+
+    evals = np.asarray(evals, dtype=float)
+    if evals.size < 3:
+        return float("nan")
+
+    evals = np.sort(evals)
+    spacings = np.diff(evals)
+    if spacings.size < 2:
+        return float("nan")
+
+    s1 = spacings[:-1]
+    s2 = spacings[1:]
+    denom = np.maximum(s1, s2)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = np.minimum(s1, s2) / denom
+    ratios = ratios[np.isfinite(ratios)]
+    if ratios.size == 0:
+        return float("nan")
+    return float(np.mean(ratios))
+
+
+def mean_level_spacing_ratio_middle_third(evals: np.ndarray) -> float:
+    """Return the mean adjacent-level spacing ratio using the middle third only."""
+
+    evals = np.asarray(evals, dtype=float)
+    if evals.size < 3:
+        return float("nan")
+
+    evals = np.sort(evals)
+    start = evals.size // 3
+    stop = (2 * evals.size) // 3
+    middle = evals[start:stop]
+    return mean_level_spacing_ratio(middle)
+
+
+def compute_pxp_spacing_series(
+    l_values: Iterable[int],
+    hxz_values: Iterable[float],
+    symmetry: tuple = (False, 0),
+    boundary: str = "OBC",
+) -> dict[int, list[tuple[float, float]]]:
+    """Compute mean level-spacing ratio versus hxz for several system sizes."""
+
+    results: dict[int, list[tuple[float, float]]] = {l: [] for l in l_values}
+
+    for l in l_values:
+        gen_dict = dict(N=l, hxz=0.0, sym=symmetry, model="PXPZ", bound=boundary)
+        basis = GetBasis(gen_dict)
+        basis_dim = basis.Ns
+
+        for hxz in hxz_values:
+            gen_dict["hxz"] = hxz
+            h_base = GetHam(gen_dict, basis)
+            h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
+            evals = np.linalg.eigvalsh(h_base_dense)
+            r_mean = mean_level_spacing_ratio_middle_third(evals)
+            results[l].append((hxz, r_mean))
+            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, <r>_mid={r_mean:.6e}")
+
+    return results
+
+
+def save_spacing_results(results: dict[int, list[tuple[float, float]]], cache_path: Path) -> None:
+    npz_dict = {}
+    for l, points in results.items():
+        hxz = np.array([p[0] for p in points], dtype=float)
+        vals = np.array([p[1] for p in points], dtype=float)
+        npz_dict[f"L_{l}_hxz"] = hxz
+        npz_dict[f"L_{l}_vals"] = vals
+    np.savez_compressed(cache_path, **npz_dict)
+
+
+def load_spacing_results(cache_path: Path) -> dict[int, list[tuple[float, float]]]:
+    arr = np.load(cache_path)
+    results = {}
+    keys = list(arr.keys())
+    ls = sorted(set(k.split("_")[1] for k in keys))
+    for l in ls:
+        hxz = arr[f"L_{l}_hxz"]
+        vals = arr[f"L_{l}_vals"]
+        results[int(l)] = list(zip(hxz.tolist(), vals.tolist()))
+    return results
+
+
+def plot_pxp_spacing_series(results: dict[int, list[tuple[float, float]]], output_path: Path) -> None:
+    """Plot mean level-spacing ratio versus hxz for several fixed system sizes."""
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
+
+    for l, points in results.items():
+        hxz_values = np.array([p[0] for p in points], dtype=float)
+        r_values = np.array([p[1] for p in points], dtype=float)
+        ax.plot(hxz_values, r_values, marker="o", linewidth=2.0, markersize=6, label=fr"$L={l}$")
+
+    ax.set_xlabel(r"Coupling $h_{xz}$")
+    ax.set_ylabel(r"Mean level spacing ratio $\langle r \rangle$")
+    ax.axhline(0.386, color="gray", linestyle="--", linewidth=1.0, alpha=0.7, label="Poisson")
+    ax.axhline(0.530, color="gray", linestyle=":", linewidth=1.0, alpha=0.7, label="GOE")
+    ax.set_title("PXPZ model: mean level spacing ratio versus $h_{xz}$")
+    ax.grid(True, linestyle=":", linewidth=0.7, alpha=0.7)
+    ax.legend(frameon=False, ncol=2)
+
+    fig.savefig(output_path, dpi=200)
+    print(f"Saved plot to {output_path}")
+
+
 def compute_pxp_spectral_series(
     l_values: Iterable[int],
     hxz: float = 0.0,
@@ -556,9 +664,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["hxz", "size", "spectral"],
+        choices=["hxz", "size", "spectral", "spacing"],
         default="hxz",
-        help="Plot AGP versus hxz, AGP versus L, or a standalone spectral function.",
+        help="Plot AGP versus hxz, AGP versus L, standalone spectral function, or mean level-spacing ratio.",
     )
     parser.add_argument(
         "--l-values",
@@ -625,6 +733,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("pxp_spectral_weight.png"),
         help="Output image path for the spectral-weight plot.",
+    )
+    parser.add_argument(
+        "--spacing-output",
+        type=Path,
+        default=Path("pxp_spacing_ratio.png"),
+        help="Output image path for the level-spacing-ratio plot.",
     )
     parser.add_argument(
         "--spectral-bins",
@@ -745,6 +859,35 @@ def main() -> None:
             save_spectral_results(spectral_results, spectral_cache_path)
 
         plot_pxp_spectral_series(spectral_results, args.spectral_output)
+    elif args.mode == "spacing":
+        hxz_values = np.linspace(args.hxz_min, args.hxz_max, args.hxz_count)
+        if len(hxz_values) == 0:
+            raise ValueError("No hxz values selected.")
+
+        print(f"Computing mean level spacing ratio for L = {l_values}")
+        print(f"Sweeping hxz over {hxz_values[0]:.5f} to {hxz_values[-1]:.5f} in {len(hxz_values)} steps")
+        spacing_params = dict(
+            l_values=list(l_values),
+            hxz_min=float(hxz_values[0]),
+            hxz_max=float(hxz_values[-1]),
+            hxz_count=int(len(hxz_values)),
+            boundary=args.boundary,
+            symmetry=[False, 0],
+        )
+        spacing_cache_path = _make_cache_path("spacing", spacing_params)
+        if (not args.force) and spacing_cache_path.exists():
+            print(f"Loading cached spacing results from {spacing_cache_path}")
+            spacing_results = load_spacing_results(spacing_cache_path)
+        else:
+            spacing_results = compute_pxp_spacing_series(
+                l_values,
+                hxz_values=hxz_values,
+                symmetry=(False, 0),
+                boundary=args.boundary,
+            )
+            save_spacing_results(spacing_results, spacing_cache_path)
+
+        plot_pxp_spacing_series(spacing_results, args.spacing_output)
 
 
 if __name__ == "__main__":
