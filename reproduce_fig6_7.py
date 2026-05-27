@@ -82,12 +82,42 @@ def spectral_weight_from_matrix(h: np.ndarray, dh: np.ndarray, mu: float, omega_
     return S
 
 
-def compute_and_plot_fig6(l_values: Iterable[int], delta: float, epsd_vals: Iterable[float], bins: int, output: Path) -> None:
+def apply_extensivity_normalization(
+    S: np.ndarray,
+    L: int,
+    *,
+    perturbation_is_extensive: bool,
+    normalization_mode: str,
+) -> np.ndarray:
+    """Apply perturbation-extensivity normalization to spectral weight.
+
+    Modes:
+    - "auto": divide by L only if perturbation is extensive.
+    - "on": always divide by L.
+    - "off": never divide by L.
+    """
+    mode = normalization_mode.lower()
+    if mode not in {"auto", "on", "off"}:
+        raise ValueError(f"Unknown normalization mode: {normalization_mode}")
+
+    if mode == "on" or (mode == "auto" and perturbation_is_extensive):
+        return S / float(L)
+    return S
+
+
+def compute_and_plot_fig6(
+    l_values: Iterable[int],
+    delta: float,
+    epsd_vals: Iterable[float],
+    bins: int,
+    output: Path,
+    normalization_mode: str,
+) -> None:
     """Compute and plot spectral weight for integrable perturbation (Fig. 6).
 
     Plot |f_lambda(omega)|^2 vs omega for lambda=Delta at different epsd (including 0 and small epsd).
     """
-    omega_min_factor = 1e-6
+    omega_min_factor = 1e-1
     fig, ax = plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
 
     for epsd in epsd_vals:
@@ -100,7 +130,14 @@ def compute_and_plot_fig6(l_values: Iterable[int], delta: float, epsd_vals: Iter
             max_omega = np.max(evals) - np.min(evals)
             omega_grid = np.logspace(np.log10(max(mu * 1e-3, 1e-12)), np.log10(max_omega + 1e-12), bins)
 
-            S = spectral_weight_from_matrix(H, dh_ddelta, mu, omega_grid)
+            S_raw = spectral_weight_from_matrix(H, dh_ddelta, mu, omega_grid)
+            # dH/dDelta is a sum of nearest-neighbor ZZ terms, i.e. extensive.
+            S = apply_extensivity_normalization(
+                S_raw,
+                L,
+                perturbation_is_extensive=True,
+                normalization_mode=normalization_mode,
+            )
 
             label = fr"L={L}, epsd={epsd:.3g}" if epsd != 0.0 else fr"L={L}, epsd=0"
             ax.loglog(omega_grid, S, label=label)
@@ -114,7 +151,13 @@ def compute_and_plot_fig6(l_values: Iterable[int], delta: float, epsd_vals: Iter
     print(f"Saved {output}")
 
 
-def compute_and_plot_fig7(l_values: Iterable[int], delta: float, output: Path, bins: int = 200) -> None:
+def compute_and_plot_fig7(
+    l_values: Iterable[int],
+    delta: float,
+    output: Path,
+    bins: int = 200,
+    normalization_mode: str = "auto",
+) -> None:
     """Compute and plot spectral weights for nonintegrable perturbations (Fig. 7).
 
     Top: lambda = epsd at epsd=0 (integrable point). Bottom: lambda=Delta at epsd=0.5 (strongly nonintegrable).
@@ -131,7 +174,14 @@ def compute_and_plot_fig7(l_values: Iterable[int], delta: float, output: Path, b
         evals = np.linalg.eigvalsh(H)
         max_omega = np.max(evals) - np.min(evals)
         omega_grid = np.logspace(np.log10(max(mu * 1e-3, 1e-12)), np.log10(max_omega + 1e-12), bins)
-        S = spectral_weight_from_matrix(H, V, mu, omega_grid)  # derivative wrt epsd is V
+        S_raw = spectral_weight_from_matrix(H, V, mu, omega_grid)  # derivative wrt epsd is V
+        # dH/depsd is a single-site Z defect term, i.e. local (non-extensive).
+        S = apply_extensivity_normalization(
+            S_raw,
+            L,
+            perturbation_is_extensive=False,
+            normalization_mode=normalization_mode,
+        )
         ax.loglog(omega_grid, S, label=fr"L={L}")
     ax.set_title("Fig.7 top: spectral weight for lambda=epsd at epsd=0 (integrable)")
     ax.set_ylabel(r"$|f_\lambda(\omega)|^2$")
@@ -147,7 +197,14 @@ def compute_and_plot_fig7(l_values: Iterable[int], delta: float, output: Path, b
         evals = np.linalg.eigvalsh(H)
         max_omega = np.max(evals) - np.min(evals)
         omega_grid = np.logspace(np.log10(max(mu * 1e-3, 1e-12)), np.log10(max_omega + 1e-12), bins)
-        S = spectral_weight_from_matrix(H, dh_ddelta, mu, omega_grid)
+        S_raw = spectral_weight_from_matrix(H, dh_ddelta, mu, omega_grid)
+        # dH/dDelta is extensive (sum over bonds).
+        S = apply_extensivity_normalization(
+            S_raw,
+            L,
+            perturbation_is_extensive=True,
+            normalization_mode=normalization_mode,
+        )
         ax.loglog(omega_grid, S, label=fr"L={L}")
     ax.set_title("Fig.7 bottom: spectral weight for lambda=Delta at epsd=0.5 (nonintegrable)")
     ax.set_xlabel(r"Frequency $\omega$")
@@ -164,6 +221,13 @@ def parse_args():
     p.add_argument("--l-values", type=int, nargs="+", default=[12, 14], help="System sizes")
     p.add_argument("--delta", type=float, default=1.1, help="XXZ anisotropy")
     p.add_argument("--bins", type=int, default=200, help="Number of frequency bins (log-spaced)")
+    p.add_argument(
+        "--normalization",
+        type=str,
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Extensivity normalization: auto (divide by L only for extensive perturbations), on (always), off (never)",
+    )
     p.add_argument("--output6", type=Path, default=Path("fig6_spectral.png"))
     p.add_argument("--output7", type=Path, default=Path("fig7_spectral.png"))
     return p.parse_args()
@@ -174,12 +238,26 @@ def main():
     l_values = args.l_values
     delta = args.delta
     bins = args.bins
+    normalization_mode = args.normalization
 
     # Fig. 6: lambda = Delta, epsd = 0 and 0.05
-    compute_and_plot_fig6(l_values, delta, epsd_vals=[0.0, 0.05], bins=bins, output=args.output6)
+    compute_and_plot_fig6(
+        l_values,
+        delta,
+        epsd_vals=[0.0, 0.05],
+        bins=bins,
+        output=args.output6,
+        normalization_mode=normalization_mode,
+    )
 
     # Fig. 7: two-panel plot
-    compute_and_plot_fig7(l_values, delta, output=args.output7, bins=bins)
+    compute_and_plot_fig7(
+        l_values,
+        delta,
+        output=args.output7,
+        bins=bins,
+        normalization_mode=normalization_mode,
+    )
 
 
 if __name__ == "__main__":

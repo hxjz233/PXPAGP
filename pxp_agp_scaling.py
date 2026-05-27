@@ -365,10 +365,11 @@ def compute_pxp_spectral_series(
         mu = l / basis_dim
         evals = np.linalg.eigvalsh(h_base_dense)
         max_omega = float(np.max(evals) - np.min(evals))
-        omega_min = max(mu * 1e-6, 1e-12)
+        omega_min = max(mu * 1e-1, 1e-12)
         omega_grid = np.logspace(np.log10(omega_min), np.log10(max_omega + 1e-12), bins)
 
         spectral = spectral_weight_from_matrix(h_base_dense, dh_dhxz_dense, mu, omega_grid)
+        spectral /= l  # normalize by L for comparison across sizes
         results[int(l)] = (omega_grid, spectral)
         print(f"Computed spectral L={l}, hxz={hxz:.5f}, D={basis_dim:6d}")
 
@@ -791,31 +792,31 @@ def main() -> None:
         plot_pxp_agp_series(results, args.output)
         
         # Also produce log(AGP/L) vs hxz plot
-        log_output = args.output.parent / f"{args.output.stem}_log{args.output.suffix}"
+        log_output = args.output.parent / f"{args.output.stem}_fit{args.output.suffix}"
         plot_pxp_agp_normalized_log_series(results, log_output)
 
-        chi_typ_params = dict(
-            l_values=list(l_values),
-            hxz_min=float(hxz_values[0]),
-            hxz_max=float(hxz_values[-1]),
-            hxz_count=int(len(hxz_values)),
-            boundary=args.boundary,
-        )
-        chi_typ_cache_path = _make_cache_path("chi_typ", chi_typ_params)
-        if (not args.force) and chi_typ_cache_path.exists():
-            print(f"Loading cached chi_typ results from {chi_typ_cache_path}")
-            chi_typ_results = load_chi_typ_results(chi_typ_cache_path)
-        else:
-            chi_typ_results = compute_pxp_chi_typ_series(
-                l_values,
-                symmetry=(False, False),
-                boundary=args.boundary,
-                hxz_values=hxz_values,
-            )
-            save_chi_typ_results(chi_typ_results, chi_typ_cache_path)
+        # chi_typ_params = dict(
+        #     l_values=list(l_values),
+        #     hxz_min=float(hxz_values[0]),
+        #     hxz_max=float(hxz_values[-1]),
+        #     hxz_count=int(len(hxz_values)),
+        #     boundary=args.boundary,
+        # )
+        # chi_typ_cache_path = _make_cache_path("chi_typ", chi_typ_params)
+        # if (not args.force) and chi_typ_cache_path.exists():
+        #     print(f"Loading cached chi_typ results from {chi_typ_cache_path}")
+        #     chi_typ_results = load_chi_typ_results(chi_typ_cache_path)
+        # else:
+        #     chi_typ_results = compute_pxp_chi_typ_series(
+        #         l_values,
+        #         symmetry=(False, False),
+        #         boundary=args.boundary,
+        #         hxz_values=hxz_values,
+        #     )
+        #     save_chi_typ_results(chi_typ_results, chi_typ_cache_path)
 
-        chi_typ_output = args.output.parent / f"{args.output.stem}_chi_typ{args.output.suffix}"
-        plot_pxp_chi_typ_series(chi_typ_results, chi_typ_output)
+        # chi_typ_output = args.output.parent / f"{args.output.stem}_chi_typ{args.output.suffix}"
+        # plot_pxp_chi_typ_series(chi_typ_results, chi_typ_output)
     elif args.mode == "size":
         print(f"Computing PXP AGP norm versus system size for hxz={args.hxz_fixed:.5f} and L = {l_values}")
         params = dict(l_values=list(l_values), hxz=float(args.hxz_fixed), boundary=args.boundary)
