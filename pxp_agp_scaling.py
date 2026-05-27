@@ -665,7 +665,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["hxz", "size", "spectral", "spacing"],
+        choices=["hxz", "size", "spectral", "spacing", "typical"],
         default="hxz",
         help="Plot AGP versus hxz, AGP versus L, standalone spectral function, or mean level-spacing ratio.",
     )
@@ -740,6 +740,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("pxp_spacing_ratio.png"),
         help="Output image path for the level-spacing-ratio plot.",
+    )
+    parser.add_argument(
+        "--chi-typ-output",
+        type=Path,
+        default=Path("pxp_chi_typ.png"),
+        help="Output image path for the typical-susceptibility plot.",
     )
     parser.add_argument(
         "--spectral-bins",
@@ -889,6 +895,34 @@ def main() -> None:
             save_spacing_results(spacing_results, spacing_cache_path)
 
         plot_pxp_spacing_series(spacing_results, args.spacing_output)
+    elif args.mode == "typical":
+        hxz_values = np.linspace(args.hxz_min, args.hxz_max, args.hxz_count)
+        if len(hxz_values) == 0:
+            raise ValueError("No hxz values selected.")
+
+        print(f"Computing typical susceptibility for L = {l_values}")
+        print(f"Sweeping hxz over {hxz_values[0]:.5f} to {hxz_values[-1]:.5f} in {len(hxz_values)} steps")
+        chi_params = dict(
+            l_values=list(l_values),
+            hxz_min=float(hxz_values[0]),
+            hxz_max=float(hxz_values[-1]),
+            hxz_count=int(len(hxz_values)),
+            boundary=args.boundary,
+        )
+        chi_cache_path = _make_cache_path("chi_typ", chi_params)
+        if (not args.force) and chi_cache_path.exists():
+            print(f"Loading cached chi_typ results from {chi_cache_path}")
+            chi_results = load_chi_typ_results(chi_cache_path)
+        else:
+            chi_results = compute_pxp_chi_typ_series(
+                l_values,
+                hxz_values=hxz_values,
+                symmetry=(False, False),
+                boundary=args.boundary,
+            )
+            save_chi_typ_results(chi_results, chi_cache_path)
+
+        plot_pxp_chi_typ_series(chi_results, args.chi_typ_output)
 
 
 if __name__ == "__main__":
