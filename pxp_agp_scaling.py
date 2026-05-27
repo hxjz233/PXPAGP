@@ -27,6 +27,7 @@ from diag import GetBasis, GetHam
 import os
 import json
 import hashlib
+from typing import Dict, Tuple
 
 
 def regularized_agp_norm_pxp(
@@ -190,6 +191,116 @@ def compute_pxp_chi_typ_series(
             print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, chi_typ/L={chi_typ_per_l:.6e}")
 
     return results
+
+
+def spectral_weight_from_matrix(h: np.ndarray, dh: np.ndarray, mu: float, omega_grid: np.ndarray) -> np.ndarray:
+    """Compute |f_lambda(omega)|^2 on omega_grid using Lorentzian broadening mu."""
+
+    evals, evecs = np.linalg.eigh(h)
+    dh_eig = evecs.conj().T @ dh @ evecs
+
+    omegas = (evals[:, None] - evals[None, :]).reshape(-1)
+    m2 = np.abs(dh_eig) ** 2
+    np.fill_diagonal(m2, 0.0)
+    m2_flat = m2.reshape(-1)
+
+    D = h.shape[0]
+    spectral = np.zeros_like(omega_grid, dtype=float)
+    for idx, omega in enumerate(omega_grid):
+        x = omega - omegas
+        lorentz = (1.0 / np.pi) * (mu / (x * x + mu * mu))
+        spectral[idx] = (1.0 / D) * np.sum(m2_flat * lorentz)
+
+    return spectral
+
+
+def compute_pxp_spectral_series(
+    l_values: Iterable[int],
+    hxz: float = 0.0,
+    bins: int = 200,
+    symmetry: tuple = (False, False),
+    boundary: str = "OBC",
+) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    """Compute spectral weight |f_{h_xz}(omega)|^2 vs omega for fixed hxz."""
+
+    results: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+
+    for l in l_values:
+        gen_dict = dict(N=l, hxz=0.0, sym=symmetry, model="PXPZ", bound=boundary)
+        basis = GetBasis(gen_dict)
+        basis_dim = basis.Ns
+
+        isPBC = 1 if boundary == "PBC" else 0
+        if isPBC:
+            zx_list = [[1.0, i, (i + 2) % l] for i in range(l)]
+            xz_list = [[1.0, (i - 2) % l, i] for i in range(l)]
+        else:
+            zx_list = [[1.0, i - 2, i] for i in range(2, l)]
+            xz_list = [[1.0, i, i + 2] for i in range(l - 2)]
+
+        dh_dhxz = hamiltonian(
+            [["zx", zx_list], ["xz", xz_list]],
+            [],
+            basis=basis,
+            dtype=np.float64,
+            check_symm=False,
+            check_pcon=False,
+            check_herm=False,
+        )
+        dh_dhxz_dense = np.asarray(dh_dhxz.toarray(), dtype=np.float64)
+
+        gen_dict["hxz"] = hxz
+        h_base = GetHam(gen_dict, basis)
+        h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
+
+        # mu = l * 2 ** (-l)
+        mu = l / basis_dim
+        evals = np.linalg.eigvalsh(h_base_dense)
+        max_omega = float(np.max(evals) - np.min(evals))
+        omega_min = max(mu * 1e-6, 1e-12)
+        omega_grid = np.logspace(np.log10(omega_min), np.log10(max_omega + 1e-12), bins)
+
+        spectral = spectral_weight_from_matrix(h_base_dense, dh_dhxz_dense, mu, omega_grid)
+        results[int(l)] = (omega_grid, spectral)
+        print(f"Computed spectral L={l}, hxz={hxz:.5f}, D={basis_dim:6d}")
+
+    return results
+
+
+def save_spectral_results(results: Dict[int, Tuple[np.ndarray, np.ndarray]], cache_path: Path) -> None:
+    npz = {}
+    for l, (omega, S) in results.items():
+        npz[f"L_{l}_omega"] = omega
+        npz[f"L_{l}_S"] = S
+    np.savez_compressed(cache_path, **npz)
+
+
+def load_spectral_results(cache_path: Path) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
+    arr = np.load(cache_path)
+    keys = list(arr.keys())
+    ls = sorted(set(k.split("_")[1] for k in keys))
+    results: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+    for l in ls:
+        omega = arr[f"L_{l}_omega"]
+        S = arr[f"L_{l}_S"]
+        results[int(l)] = (omega, S)
+    return results
+
+
+def plot_pxp_spectral_series(results: Dict[int, Tuple[np.ndarray, np.ndarray]], output_path: Path) -> None:
+    fig, ax = plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
+
+    for l, (omega, S) in results.items():
+        ax.loglog(omega, S, marker="", linewidth=1.5, label=fr"$L={l}$")
+
+    ax.set_xlabel(r"Frequency $\omega$")
+    ax.set_ylabel(r"$|f_{h_{xz}}(\omega)|^2$")
+    ax.set_title(r"PXPZ: spectral weight $|f_{h_{xz}}(\omega)|^2$ (fixed $h_{xz}$)")
+    ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
+    ax.legend(frameon=False)
+
+    fig.savefig(output_path, dpi=200)
+    print(f"Saved plot to {output_path}")
 
 
 def compute_pxp_agp_size_series(
@@ -445,9 +556,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["hxz", "size"],
+        choices=["hxz", "size", "spectral"],
         default="hxz",
-        help="Plot AGP versus hxz at fixed L values or AGP versus L at fixed hxz.",
+        help="Plot AGP versus hxz, AGP versus L, or a standalone spectral function.",
     )
     parser.add_argument(
         "--l-values",
@@ -508,6 +619,24 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("pxp_agp_scaling.png"),
         help="Output image path.",
+    )
+    parser.add_argument(
+        "--spectral-output",
+        type=Path,
+        default=Path("pxp_spectral_weight.png"),
+        help="Output image path for the spectral-weight plot.",
+    )
+    parser.add_argument(
+        "--spectral-bins",
+        type=int,
+        default=200,
+        help="Number of log-spaced frequency bins for the spectral-weight plot.",
+    )
+    parser.add_argument(
+        "--spectral-hxz",
+        type=float,
+        default=0.0,
+        help="Fixed hxz value used for the spectral-weight plot.",
     )
     return parser.parse_args()
 
@@ -573,7 +702,7 @@ def main() -> None:
 
         chi_typ_output = args.output.parent / f"{args.output.stem}_chi_typ{args.output.suffix}"
         plot_pxp_chi_typ_series(chi_typ_results, chi_typ_output)
-    else:
+    elif args.mode == "size":
         print(f"Computing PXP AGP norm versus system size for hxz={args.hxz_fixed:.5f} and L = {l_values}")
         params = dict(l_values=list(l_values), hxz=float(args.hxz_fixed), boundary=args.boundary)
         cache_path = _make_cache_path("size", params)
@@ -590,6 +719,32 @@ def main() -> None:
             save_size_results(results, cache_path)
 
         plot_pxp_agp_size_series(results, args.output)
+    elif args.mode == "spectral":
+        spectral_hxz = float(args.spectral_hxz)
+        spectral_bins = int(args.spectral_bins)
+
+        print(f"Computing PXP spectral weight for hxz={spectral_hxz:.5f} and L = {l_values}")
+        spectral_params = dict(
+            l_values=list(l_values),
+            hxz=spectral_hxz,
+            bins=spectral_bins,
+            boundary=args.boundary,
+        )
+        spectral_cache_path = _make_cache_path("spectral_hxz", spectral_params)
+        if (not args.force) and spectral_cache_path.exists():
+            print(f"Loading cached spectral results from {spectral_cache_path}")
+            spectral_results = load_spectral_results(spectral_cache_path)
+        else:
+            spectral_results = compute_pxp_spectral_series(
+                l_values,
+                hxz=spectral_hxz,
+                bins=spectral_bins,
+                symmetry=(False, False),
+                boundary=args.boundary,
+            )
+            save_spectral_results(spectral_results, spectral_cache_path)
+
+        plot_pxp_spectral_series(spectral_results, args.spectral_output)
 
 
 if __name__ == "__main__":
