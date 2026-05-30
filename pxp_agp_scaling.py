@@ -155,7 +155,7 @@ def compute_pxp_chi_typ_series(
     symmetry: tuple = (False, False),
     boundary: str = "OBC",
 ) -> dict[int, list[tuple[float, float]]]:
-    """Compute typical susceptibility versus hxz for several fixed system sizes."""
+    """Compute typical susceptibility/(L D) versus hxz for several fixed system sizes."""
 
     results: dict[int, list[tuple[float, float]]] = {l: [] for l in l_values}
 
@@ -189,9 +189,9 @@ def compute_pxp_chi_typ_series(
             h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
 
             chi_typ = typical_susceptibility_pxp(h_base_dense, dh_dhxz_dense)
-            chi_typ_per_l = chi_typ / l
-            results[l].append((hxz, chi_typ_per_l))
-            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, chi_typ/L={chi_typ_per_l:.6e}")
+            chi_typ_per_ld = chi_typ / (l * basis_dim)
+            results[l].append((hxz, chi_typ_per_ld))
+            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, chi_typ/(L D)={chi_typ_per_ld:.6e}")
 
     return results
 
@@ -556,7 +556,7 @@ def plot_pxp_agp_series(results: dict[int, list[tuple[float, float]]], output_pa
 
 
 def plot_pxp_chi_typ_series(results: dict[int, list[tuple[float, float]]], output_path: Path) -> None:
-    """Plot typical susceptibility versus hxz for several fixed system sizes."""
+    """Plot typical susceptibility/(L D) versus hxz for several fixed system sizes."""
 
     fig, ax = plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
 
@@ -566,8 +566,8 @@ def plot_pxp_chi_typ_series(results: dict[int, list[tuple[float, float]]], outpu
         ax.semilogy(hxz_values, chi_values, marker="o", linewidth=2.0, markersize=6, label=fr"$L={l}$")
 
     ax.set_xlabel(r"Coupling $h_{xz}$")
-    ax.set_ylabel(r"$\chi_{\mathrm{typ}}$")
-    ax.set_title("PXPZ model: typical susceptibility versus $h_{xz}$")
+    ax.set_ylabel(r"$\chi_{\mathrm{typ}} / (L D)$")
+    ax.set_title("PXPZ model: typical susceptibility/(L D) versus $h_{xz}$")
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, ncol=2)
 
