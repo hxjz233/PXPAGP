@@ -5,6 +5,9 @@ PXPZ Hamiltonian and computes the regularized AGP norm with respect to hxz.
 It can plot either AGP versus hxz for several fixed system sizes L, or the
 previous system-size scaling curve at fixed hxz.
 
+AGP values are normalized as ||A_hxz||^2 / (L D), where D is the Hilbert-space
+dimension of the selected symmetry sector.
+
 size sweep: python pxp_agp_scaling.py --mode size --l-values 10 12 --hxz-fixed 0.0
 hxz series: python pxp_agp_scaling.py --mode hxz --l-values 10 12 --hxz-min 0.0 --hxz-max 0.1 --hxz-count 3
 """
@@ -98,7 +101,7 @@ def compute_pxp_agp_series(
     terms in the Hamiltonian are proportional to hxz, dH/dhxz is simply the sum
     of those two operators with unit coefficient.
 
-    Returns a mapping L -> list[(hxz, ||A_hxz||^2 / L)].
+    Returns a mapping L -> list[(hxz, ||A_hxz||^2 / (L D))].
     """
 
     results: dict[int, list[tuple[float, float]]] = {l: [] for l in l_values}
@@ -138,10 +141,10 @@ def compute_pxp_agp_series(
 
             # Compute regularized AGP norm at this hxz value.
             norm_sq = regularized_agp_norm_pxp(h_base_dense, dh_dhxz_dense, mu)
-            norm_sq_per_l = norm_sq / l
+            norm_sq_per_ld = norm_sq / (l * basis_dim)
 
-            results[l].append((hxz, norm_sq_per_l))
-            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, ||A_hxz||^2/L={norm_sq_per_l:.6e}")
+            results[l].append((hxz, norm_sq_per_ld))
+            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, ||A_hxz||^2/(L D)={norm_sq_per_ld:.6e}")
 
     return results
 
@@ -420,7 +423,7 @@ def compute_pxp_agp_size_series(
 ) -> list[tuple[int, float, int]]:
     """Compute AGP norm versus system size at a fixed hxz value.
 
-    Returns list of (L, ||A_hxz||^2 / L, basis_dim) tuples.
+    Returns list of (L, ||A_hxz||^2 / (L D), basis_dim) tuples.
     """
 
     results: list[tuple[int, float, int]] = []
@@ -454,10 +457,10 @@ def compute_pxp_agp_size_series(
 
         mu = l / basis_dim
         norm_sq = regularized_agp_norm_pxp(h_base_dense, dh_dhxz_dense, mu)
-        norm_sq_per_l = norm_sq / l
+        norm_sq_per_ld = norm_sq / (l * basis_dim)
 
-        results.append((l, norm_sq_per_l, basis_dim))
-        print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, ||A_hxz||^2/L={norm_sq_per_l:.6e}")
+        results.append((l, norm_sq_per_ld, basis_dim))
+        print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, ||A_hxz||^2/(L D)={norm_sq_per_ld:.6e}")
 
     return results
 
@@ -543,8 +546,8 @@ def plot_pxp_agp_series(results: dict[int, list[tuple[float, float]]], output_pa
         ax.semilogy(hxz_values, agp_values, marker="o", linewidth=2.0, markersize=6, label=fr"$L={l}$")
 
     ax.set_xlabel(r"Coupling $h_{xz}$")
-    ax.set_ylabel(r"$\|A_{hxz}\|^2 / L$")
-    ax.set_title("PXPZ model: regularized AGP versus $h_{xz}$")
+    ax.set_ylabel(r"$\|A_{hxz}\|^2 / (L D)$")
+    ax.set_title("PXPZ model: regularized AGP/(L D) versus $h_{xz}$")
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, ncol=2)
 
@@ -573,9 +576,9 @@ def plot_pxp_chi_typ_series(results: dict[int, list[tuple[float, float]]], outpu
 
 
 def plot_pxp_agp_normalized_log_series(results: dict[int, list[tuple[float, float]]], output_path: Path) -> None:
-    """Plot slope and intercept of log(AGP/L) vs L at each hxz.
+    """Plot slope and intercept of log(AGP/(L D)) vs L at each hxz.
     
-    For each hxz value, fit log(AGP/L) = slope * L + intercept across all system sizes,
+    For each hxz value, fit log(AGP/(L D)) = slope * L + intercept across all system sizes,
     then plot slope and intercept as functions of hxz.
     """
     
@@ -591,13 +594,13 @@ def plot_pxp_agp_normalized_log_series(results: dict[int, list[tuple[float, floa
     intercepts = []
     hxz_values = sorted(hxz_to_data.keys())
     
-    # For each hxz, fit log(AGP/L) vs L
+    # For each hxz, fit log(AGP/(L D)) vs L
     for hxz in hxz_values:
         l_vals = np.array([x[0] for x in hxz_to_data[hxz]], dtype=float)
         agp_vals = np.array([x[1] for x in hxz_to_data[hxz]], dtype=float)
         log_agp_vals = np.log(agp_vals)
         
-        # Fit: log(AGP/L) = slope * L + intercept
+        # Fit: log(AGP/(L D)) = slope * L + intercept
         slope, intercept = np.polyfit(l_vals, log_agp_vals, 1)
         slopes.append(slope)
         intercepts.append(intercept)
@@ -613,15 +616,15 @@ def plot_pxp_agp_normalized_log_series(results: dict[int, list[tuple[float, floa
     ax1.plot(hxz_array, slopes, marker="o", linewidth=2.0, markersize=6, color="C0")
     ax1.axhline(np.log((np.sqrt(5)+1)/2), color="gray", linestyle="--", linewidth=1.0, alpha=0.7)
     ax1.set_xlabel(r"Coupling $h_{xz}$")
-    ax1.set_ylabel(r"Slope of $\log(\|A_{hxz}\|^2 / L)$ vs $L$")
-    ax1.set_title("Slope of log(AGP/L) vs system size")
+    ax1.set_ylabel(r"Slope of $\log(\|A_{hxz}\|^2 / (L D))$ vs $L$")
+    ax1.set_title("Slope of log(AGP/(L D)) vs system size")
     ax1.grid(True, linestyle=":", linewidth=0.7, alpha=0.7)
     
     # Plot intercept vs hxz
     ax2.plot(hxz_array, intercepts, marker="s", linewidth=2.0, markersize=6, color="C1")
     ax2.set_xlabel(r"Coupling $h_{xz}$")
-    ax2.set_ylabel(r"Intercept of $\log(\|A_{hxz}\|^2 / L)$ vs $L$")
-    ax2.set_title("Intercept of log(AGP/L) vs system size")
+    ax2.set_ylabel(r"Intercept of $\log(\|A_{hxz}\|^2 / (L D))$ vs $L$")
+    ax2.set_title("Intercept of log(AGP/(L D)) vs system size")
     ax2.grid(True, linestyle=":", linewidth=0.7, alpha=0.7)
     
     fig.savefig(output_path, dpi=200)
@@ -641,7 +644,7 @@ def plot_pxp_agp_size_series(results: list[tuple[int, float, int]], output_path:
     lengths = np.array([r[0] for r in results], dtype=float)
     values = np.array([r[1] for r in results], dtype=float)
 
-    ax.semilogy(lengths, values, marker="o", linewidth=2.0, markersize=8, label=r"$\|A_{h_{xz}}\|^2/L$")
+    ax.semilogy(lengths, values, marker="o", linewidth=2.0, markersize=8, label=r"$\|A_{h_{xz}}\|^2/(L D)$")
 
     if len(results) >= 3:
         tail_lengths = lengths[-3:]
@@ -652,8 +655,8 @@ def plot_pxp_agp_size_series(results: list[tuple[int, float, int]], output_path:
         print(f"Exponential slope (last 3 points): {slope:.4f}")
 
     ax.set_xlabel(r"System size $L$")
-    ax.set_ylabel(r"$\|A_{h_{xz}}\|^2 / L$")
-    ax.set_title("PXPZ model: regularized AGP scaling with system size")
+    ax.set_ylabel(r"$\|A_{h_{xz}}\|^2 / (L D)$")
+    ax.set_title("PXPZ model: regularized AGP/(L D) scaling with system size")
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False)
 
@@ -781,7 +784,13 @@ def main() -> None:
 
         print(f"Computing PXP AGP norm for L = {l_values}")
         print(f"Sweeping hxz over {hxz_values[0]:.5f} to {hxz_values[-1]:.5f} in {len(hxz_values)} steps")
-        params = dict(l_values=list(l_values), hxz_min=float(hxz_values[0]), hxz_max=float(hxz_values[-1]), hxz_count=int(len(hxz_values)), boundary=args.boundary)
+        params = dict(
+            l_values=list(l_values),
+            hxz_min=float(hxz_values[0]),
+            hxz_max=float(hxz_values[-1]),
+            hxz_count=int(len(hxz_values)),
+            boundary=args.boundary,
+        )
         cache_path = _make_cache_path("hxz", params)
         if (not args.force) and cache_path.exists():
             print(f"Loading cached hxz results from {cache_path}")
@@ -800,29 +809,6 @@ def main() -> None:
         # Also produce log(AGP/L) vs hxz plot
         log_output = args.output.parent / f"{args.output.stem}_fit{args.output.suffix}"
         plot_pxp_agp_normalized_log_series(results, log_output)
-
-        # chi_typ_params = dict(
-        #     l_values=list(l_values),
-        #     hxz_min=float(hxz_values[0]),
-        #     hxz_max=float(hxz_values[-1]),
-        #     hxz_count=int(len(hxz_values)),
-        #     boundary=args.boundary,
-        # )
-        # chi_typ_cache_path = _make_cache_path("chi_typ", chi_typ_params)
-        # if (not args.force) and chi_typ_cache_path.exists():
-        #     print(f"Loading cached chi_typ results from {chi_typ_cache_path}")
-        #     chi_typ_results = load_chi_typ_results(chi_typ_cache_path)
-        # else:
-        #     chi_typ_results = compute_pxp_chi_typ_series(
-        #         l_values,
-        #         symmetry=(False, False),
-        #         boundary=args.boundary,
-        #         hxz_values=hxz_values,
-        #     )
-        #     save_chi_typ_results(chi_typ_results, chi_typ_cache_path)
-
-        # chi_typ_output = args.output.parent / f"{args.output.stem}_chi_typ{args.output.suffix}"
-        # plot_pxp_chi_typ_series(chi_typ_results, chi_typ_output)
     elif args.mode == "size":
         print(f"Computing PXP AGP norm versus system size for hxz={args.hxz_fixed:.5f} and L = {l_values}")
         params = dict(l_values=list(l_values), hxz=float(args.hxz_fixed), boundary=args.boundary)
