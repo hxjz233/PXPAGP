@@ -614,6 +614,7 @@ def plot_pxp_agp_normalized_log_series(results: dict[int, list[tuple[float, floa
     
     # Plot slope vs hxz
     ax1.plot(hxz_array, slopes, marker="o", linewidth=2.0, markersize=6, color="C0")
+    ax1.axhline(0.0, color="gray", linestyle="--", linewidth=1.0, alpha=0.7)
     ax1.axhline(np.log((np.sqrt(5)+1)/2), color="gray", linestyle="--", linewidth=1.0, alpha=0.7)
     ax1.set_xlabel(r"Coupling $h_{xz}$")
     ax1.set_ylabel(r"Slope of $\log(\|A_{hxz}\|^2 / (L D))$ vs $L$")
