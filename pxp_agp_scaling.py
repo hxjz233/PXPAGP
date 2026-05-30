@@ -30,6 +30,7 @@ from diag import GetBasis, GetHam
 import os
 import json
 import hashlib
+import time
 from typing import Dict, Tuple
 
 
@@ -105,8 +106,10 @@ def compute_pxp_agp_series(
     """
 
     results: dict[int, list[tuple[float, float]]] = {l: [] for l in l_values}
+    total_start = time.perf_counter()
 
     for l in l_values:
+        l_start = time.perf_counter()
         gen_dict = dict(N=l, hxz=0.0, sym=symmetry, model="PXPZ", bound=boundary)
         basis = GetBasis(gen_dict)
         basis_dim = basis.Ns
@@ -135,6 +138,7 @@ def compute_pxp_agp_series(
         mu = l / basis_dim
 
         for hxz in hxz_values:
+            hxz_start = time.perf_counter()
             gen_dict["hxz"] = hxz
             h_base = GetHam(gen_dict, basis)
             h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
@@ -144,7 +148,12 @@ def compute_pxp_agp_series(
             norm_sq_per_ld = norm_sq / (l * basis_dim)
 
             results[l].append((hxz, norm_sq_per_ld))
-            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, ||A_hxz||^2/(L D)={norm_sq_per_ld:.6e}")
+            # print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, ||A_hxz||^2/(L D)={norm_sq_per_ld:.6e}")
+            print(f"** hxz step time: L={l:2d}, hxz={hxz: .5f}, elapsed={time.perf_counter() - hxz_start:.2f}s")
+
+        print(f"## L={l:2d} hxz sweep finished in {time.perf_counter() - l_start:.2f}s")
+
+    print(f"## AGP hxz-series computation finished in {time.perf_counter() - total_start:.2f}s")
 
     return results
 
@@ -158,8 +167,10 @@ def compute_pxp_chi_typ_series(
     """Compute typical susceptibility/(L D) versus hxz for several fixed system sizes."""
 
     results: dict[int, list[tuple[float, float]]] = {l: [] for l in l_values}
+    total_start = time.perf_counter()
 
     for l in l_values:
+        l_start = time.perf_counter()
         gen_dict = dict(N=l, hxz=0.0, sym=symmetry, model="PXPZ", bound=boundary)
         basis = GetBasis(gen_dict)
         basis_dim = basis.Ns
@@ -184,6 +195,7 @@ def compute_pxp_chi_typ_series(
         dh_dhxz_dense = np.asarray(dh_dhxz.toarray(), dtype=np.float64)
 
         for hxz in hxz_values:
+            hxz_start = time.perf_counter()
             gen_dict["hxz"] = hxz
             h_base = GetHam(gen_dict, basis)
             h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
@@ -191,7 +203,12 @@ def compute_pxp_chi_typ_series(
             chi_typ = typical_susceptibility_pxp(h_base_dense, dh_dhxz_dense)
             chi_typ_per_ld = chi_typ / (l * basis_dim)
             results[l].append((hxz, chi_typ_per_ld))
-            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, chi_typ/(L D)={chi_typ_per_ld:.6e}")
+            # print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, chi_typ/(L D)={chi_typ_per_ld:.6e}")
+            print(f"** hxz step time: L={l:2d}, hxz={hxz: .5f}, elapsed={time.perf_counter() - hxz_start:.2f}s")
+
+        print(f"## L={l:2d} chi_typ sweep finished in {time.perf_counter() - l_start:.2f}s")
+
+    print(f"## chi_typ hxz-series computation finished in {time.perf_counter() - total_start:.2f}s")
 
     return results
 
@@ -263,20 +280,28 @@ def compute_pxp_spacing_series(
     """Compute mean level-spacing ratio versus hxz for several system sizes."""
 
     results: dict[int, list[tuple[float, float]]] = {l: [] for l in l_values}
+    total_start = time.perf_counter()
 
     for l in l_values:
+        l_start = time.perf_counter()
         gen_dict = dict(N=l, hxz=0.0, sym=symmetry, model="PXPZ", bound=boundary)
         basis = GetBasis(gen_dict)
         basis_dim = basis.Ns
 
         for hxz in hxz_values:
+            hxz_start = time.perf_counter()
             gen_dict["hxz"] = hxz
             h_base = GetHam(gen_dict, basis)
             h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
             evals = np.linalg.eigvalsh(h_base_dense)
             r_mean = mean_level_spacing_ratio_middle_third(evals)
             results[l].append((hxz, r_mean))
-            print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, <r>_mid={r_mean:.6e}")
+            # print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, <r>_mid={r_mean:.6e}")
+            print(f"** hxz step time: L={l:2d}, hxz={hxz: .5f}, elapsed={time.perf_counter() - hxz_start:.2f}s")
+
+        print(f"## L={l:2d} spacing sweep finished in {time.perf_counter() - l_start:.2f}s")
+
+    print(f"## spacing hxz-series computation finished in {time.perf_counter() - total_start:.2f}s")
 
     return results
 
@@ -335,8 +360,10 @@ def compute_pxp_spectral_series(
     """Compute spectral weight |f_{h_xz}(omega)|^2 vs omega for fixed hxz."""
 
     results: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    total_start = time.perf_counter()
 
     for l in l_values:
+        l_start = time.perf_counter()
         gen_dict = dict(N=l, hxz=0.0, sym=symmetry, model="PXPZ", bound=boundary)
         basis = GetBasis(gen_dict)
         basis_dim = basis.Ns
@@ -375,6 +402,9 @@ def compute_pxp_spectral_series(
         spectral /= l  # normalize by L for comparison across sizes
         results[int(l)] = (omega_grid, spectral)
         print(f"Computed spectral L={l}, hxz={hxz:.5f}, D={basis_dim:6d}")
+        print(f"Timing: L={l:2d} spectral computation finished in {time.perf_counter() - l_start:.2f}s")
+
+    print(f"Timing: spectral computation finished in {time.perf_counter() - total_start:.2f}s")
 
     return results
 
@@ -427,8 +457,10 @@ def compute_pxp_agp_size_series(
     """
 
     results: list[tuple[int, float, int]] = []
+    total_start = time.perf_counter()
 
     for l in l_values:
+        l_start = time.perf_counter()
         gen_dict = dict(N=l, hxz=hxz, sym=symmetry, model="PXPZ", bound=boundary)
         basis = GetBasis(gen_dict)
         basis_dim = basis.Ns
@@ -461,6 +493,9 @@ def compute_pxp_agp_size_series(
 
         results.append((l, norm_sq_per_ld, basis_dim))
         print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, ||A_hxz||^2/(L D)={norm_sq_per_ld:.6e}")
+        print(f"Timing: L={l:2d} size-scaling point finished in {time.perf_counter() - l_start:.2f}s")
+
+    print(f"Timing: AGP size-series computation finished in {time.perf_counter() - total_start:.2f}s")
 
     return results
 
