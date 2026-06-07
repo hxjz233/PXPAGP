@@ -1,2 +1,5 @@
 - [ ] spectral power-law region not collapsing. why?
 - [ ] using AGP max to scan for the integrability restoring point and find the free theory. range-4 term may serve as renormalization of higher-order terms
+- [ ] odd + even for L=18 does not match in prefactor of magnitude vs total? Is this method sensitive or not to symmetry/Krylov sectors?
+- [ ] merging data
+- [ ] do I scale by 1/D or mu?

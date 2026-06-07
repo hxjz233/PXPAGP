@@ -509,6 +509,14 @@ def _make_cache_path(mode: str, params: dict) -> Path:
     return cache_dir / f"pxp_agp_{mode}_{h}.npz"
 
 
+def _cache_params_with_inv_sector(params: dict, inv_sector: int | None) -> dict:
+    if inv_sector is None:
+        return params
+    merged = dict(params)
+    merged["inv_sector"] = int(inv_sector)
+    return merged
+
+
 def save_hxz_results(results: dict[int, list[tuple[float, float]]], cache_path: Path) -> None:
     # convert to arrays per L
     npz_dict = {}
@@ -758,6 +766,13 @@ def parse_args() -> argparse.Namespace:
         help="Boundary conditions.",
     )
     parser.add_argument(
+        "--inv-sector",
+        type=int,
+        choices=[0, 1],
+        default=None,
+        help="Optional inversion-parity sector; pass 0 or 1 to use that symmetry sector.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Bypass cached results and recompute.",
@@ -804,6 +819,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    symmetry = (False, args.inv_sector) if args.inv_sector is not None else (False, False)
+
     if args.l_min is not None or args.l_max is not None:
         if args.l_min is None or args.l_max is None:
             raise ValueError("Specify both --l-min and --l-max, or use --l-values.")
@@ -827,6 +844,7 @@ def main() -> None:
             hxz_count=int(len(hxz_values)),
             boundary=args.boundary,
         )
+        params = _cache_params_with_inv_sector(params, args.inv_sector)
         cache_path = _make_cache_path("hxz", params)
         if (not args.force) and cache_path.exists():
             print(f"Loading cached hxz results from {cache_path}")
@@ -834,7 +852,7 @@ def main() -> None:
         else:
             results = compute_pxp_agp_series(
                 l_values,
-                symmetry=(False, False),
+                symmetry=symmetry,
                 boundary=args.boundary,
                 hxz_values=hxz_values,
             )
@@ -847,7 +865,10 @@ def main() -> None:
         plot_pxp_agp_normalized_log_series(results, log_output)
     elif args.mode == "size":
         print(f"Computing PXP AGP norm versus system size for hxz={args.hxz_fixed:.5f} and L = {l_values}")
-        params = dict(l_values=list(l_values), hxz=float(args.hxz_fixed), boundary=args.boundary)
+        params = _cache_params_with_inv_sector(
+            dict(l_values=list(l_values), hxz=float(args.hxz_fixed), boundary=args.boundary),
+            args.inv_sector,
+        )
         cache_path = _make_cache_path("size", params)
         if (not args.force) and cache_path.exists():
             print(f"Loading cached size results from {cache_path}")
@@ -856,7 +877,7 @@ def main() -> None:
             results = compute_pxp_agp_size_series(
                 l_values,
                 hxz=args.hxz_fixed,
-                symmetry=(False, False),
+                symmetry=symmetry,
                 boundary=args.boundary,
             )
             save_size_results(results, cache_path)
@@ -873,6 +894,7 @@ def main() -> None:
             bins=spectral_bins,
             boundary=args.boundary,
         )
+        spectral_params = _cache_params_with_inv_sector(spectral_params, args.inv_sector)
         spectral_cache_path = _make_cache_path("spectral_hxz", spectral_params)
         if (not args.force) and spectral_cache_path.exists():
             print(f"Loading cached spectral results from {spectral_cache_path}")
@@ -882,7 +904,7 @@ def main() -> None:
                 l_values,
                 hxz=spectral_hxz,
                 bins=spectral_bins,
-                symmetry=(False, False),
+                symmetry=symmetry,
                 boundary=args.boundary,
             )
             save_spectral_results(spectral_results, spectral_cache_path)
@@ -931,6 +953,7 @@ def main() -> None:
             hxz_count=int(len(hxz_values)),
             boundary=args.boundary,
         )
+        chi_params = _cache_params_with_inv_sector(chi_params, args.inv_sector)
         chi_cache_path = _make_cache_path("chi_typ", chi_params)
         if (not args.force) and chi_cache_path.exists():
             print(f"Loading cached chi_typ results from {chi_cache_path}")
@@ -939,7 +962,7 @@ def main() -> None:
             chi_results = compute_pxp_chi_typ_series(
                 l_values,
                 hxz_values=hxz_values,
-                symmetry=(False, False),
+                symmetry=symmetry,
                 boundary=args.boundary,
             )
             save_chi_typ_results(chi_results, chi_cache_path)
