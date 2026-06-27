@@ -15,8 +15,13 @@ hxz series: python pxp_agp_scaling.py --mode hxz --l-values 10 12 --hxz-min 0.0 
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Iterable
+
+CPUNUM = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1))
+for _thread_var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ[_thread_var] = str(CPUNUM)
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,7 +38,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent / "PXP_infra"))
 
 from diag import GetBasis, GetHam  # pyright: ignore[reportMissingImports]
-import os
 import json
 import hashlib
 import time
@@ -183,6 +187,7 @@ def compute_pxp_agp_series(
         gen_dict = dict(N=l, hxz=0.0, sym=symmetry, model="PXPZ", bound=boundary)
         basis = GetBasis(gen_dict)
         basis_dim = basis.Ns
+        print(f"Computing AGP for L={l}, basis dimension D={basis_dim}")
 
         # Construct dH/dhxz operator (the ZX and XZ terms with coefficient 1.0)
         isPBC = 1 if boundary == "PBC" else 0
@@ -609,6 +614,40 @@ def _cache_params_with_inv_sector(params: dict, inv_sector: int | None) -> dict:
     return merged
 
 
+def _shard_hxz_values(hxz_values: np.ndarray, shard_index: int, shard_count: int) -> np.ndarray:
+    if shard_count < 1:
+        raise ValueError("shard_count must be at least 1")
+    if shard_index < 0 or shard_index >= shard_count:
+        raise ValueError("shard_index must satisfy 0 <= shard_index < shard_count")
+    if shard_count == 1:
+        return hxz_values
+    return hxz_values[shard_index::shard_count]
+
+
+def _hxz_shard_cache_path(mode: str, params: dict, shard_index: int, shard_count: int) -> Path:
+    shard_params = dict(params)
+    shard_params["hxz_shard_index"] = int(shard_index)
+    shard_params["hxz_shard_count"] = int(shard_count)
+    return _make_cache_path(mode, shard_params)
+
+
+def merge_hxz_results(shard_paths: Iterable[Path]) -> dict[int, list[tuple[float, float]]]:
+    merged: dict[int, dict[float, float]] = {}
+    for cache_path in shard_paths:
+        if not cache_path.exists():
+            raise FileNotFoundError(f"Missing shard cache: {cache_path}")
+        shard_results = load_hxz_results(cache_path)
+        for l, points in shard_results.items():
+            bucket = merged.setdefault(l, {})
+            for hxz, value in points:
+                bucket[float(hxz)] = float(value)
+
+    combined: dict[int, list[tuple[float, float]]] = {}
+    for l, hxz_map in merged.items():
+        combined[l] = sorted(hxz_map.items(), key=lambda item: item[0])
+    return combined
+
+
 def save_hxz_results(results: dict[int, list[tuple[float, float]]], cache_path: Path) -> None:
     # convert to arrays per L
     npz_dict = {}
@@ -844,6 +883,23 @@ def parse_args() -> argparse.Namespace:
         help="Number of hxz points in the sweep.",
     )
     parser.add_argument(
+        "--hxz-shard-index",
+        type=int,
+        default=0,
+        help="Zero-based shard index used to split the hxz sweep across jobs.",
+    )
+    parser.add_argument(
+        "--hxz-shard-count",
+        type=int,
+        default=1,
+        help="Total number of hxz shards; values are assigned round-robin.",
+    )
+    parser.add_argument(
+        "--collect-hxz-shards",
+        action="store_true",
+        help="Load all shard caches for the current hxz sweep and rebuild the full result.",
+    )
+    parser.add_argument(
         "--l-min",
         type=int,
         default=None,
@@ -920,6 +976,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    print(f"Using {CPUNUM} CPU thread(s) for linear algebra")
 
     args.output = _fig_output_path(args.output)
     args.spectral_output = _fig_output_path(args.spectral_output)
@@ -938,39 +995,60 @@ def main() -> None:
         raise ValueError("No system sizes selected.")
 
     if args.mode == "hxz":
-        hxz_values = np.linspace(args.hxz_min, args.hxz_max, args.hxz_count)
-        if len(hxz_values) == 0:
+        all_hxz_values = np.linspace(args.hxz_min, args.hxz_max, args.hxz_count)
+        if len(all_hxz_values) == 0:
             raise ValueError("No hxz values selected.")
 
-        print(f"Computing PXP AGP norm for L = {l_values}")
-        print(f"Sweeping hxz over {hxz_values[0]:.5f} to {hxz_values[-1]:.5f} in {len(hxz_values)} steps")
+        print(f"Sweeping hxz over {all_hxz_values[0]:.5f} to {all_hxz_values[-1]:.5f} in {len(all_hxz_values)} steps")
         params = dict(
             l_values=list(l_values),
-            hxz_min=float(hxz_values[0]),
-            hxz_max=float(hxz_values[-1]),
-            hxz_count=int(len(hxz_values)),
+            hxz_min=float(all_hxz_values[0]),
+            hxz_max=float(all_hxz_values[-1]),
+            hxz_count=int(len(all_hxz_values)),
             boundary=args.boundary,
         )
         params = _cache_params_with_inv_sector(params, args.inv_sector)
-        cache_path = _make_cache_path("hxz", params)
-        if (not args.force) and cache_path.exists():
-            print(f"Loading cached hxz results from {cache_path}")
-            results = load_hxz_results(cache_path)
-        else:
-            results = compute_pxp_agp_series(
-                l_values,
-                symmetry=symmetry,
-                boundary=args.boundary,
-                hxz_values=hxz_values,
-                backend=args.backend,
-            )
-            save_hxz_results(results, cache_path)
+        shard_count = int(args.hxz_shard_count)
+        shard_index = int(args.hxz_shard_index)
+        if shard_count > 1:
+            print(f"Using hxz shard {shard_index + 1}/{shard_count}")
 
-        plot_pxp_agp_series(results, args.output)
-        
-        # Also produce log(AGP/L) vs hxz plot
-        log_output = args.output.parent / f"{args.output.stem}_fit{args.output.suffix}"
-        plot_pxp_agp_normalized_log_series(results, log_output)
+        if args.collect_hxz_shards:
+            shard_paths = [_hxz_shard_cache_path("hxz", params, i, shard_count) for i in range(shard_count)]
+            print(f"Collecting {len(shard_paths)} hxz shard caches")
+            results = merge_hxz_results(shard_paths)
+            cache_path = _make_cache_path("hxz", params)
+            save_hxz_results(results, cache_path)
+            print(f"Saved merged hxz cache to {cache_path}")
+            plot_pxp_agp_series(results, args.output)
+            log_output = args.output.parent / f"{args.output.stem}_fit{args.output.suffix}"
+            plot_pxp_agp_normalized_log_series(results, log_output)
+        else:
+            hxz_values = _shard_hxz_values(all_hxz_values, shard_index, shard_count)
+            if len(hxz_values) == 0:
+                raise ValueError("This hxz shard has no assigned points.")
+
+            cache_path = _hxz_shard_cache_path("hxz", params, shard_index, shard_count)
+            if (not args.force) and cache_path.exists():
+                print(f"Loading cached hxz results from {cache_path}")
+                results = load_hxz_results(cache_path)
+            else:
+                results = compute_pxp_agp_series(
+                    l_values,
+                    symmetry=symmetry,
+                    boundary=args.boundary,
+                    hxz_values=hxz_values,
+                    backend=args.backend,
+                )
+                save_hxz_results(results, cache_path)
+                print(f"Saved shard cache to {cache_path}")
+
+            if shard_count == 1:
+                plot_pxp_agp_series(results, args.output)
+                log_output = args.output.parent / f"{args.output.stem}_fit{args.output.suffix}"
+                plot_pxp_agp_normalized_log_series(results, log_output)
+            else:
+                print("Shard mode skips plotting; run with --collect-hxz-shards to build the combined figure.")
     elif args.mode == "size":
         print(f"Computing PXP AGP norm versus system size for hxz={args.hxz_fixed:.5f} and L = {l_values}")
         params = _cache_params_with_inv_sector(
