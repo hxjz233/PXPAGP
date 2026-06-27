@@ -15,7 +15,6 @@ hxz series: python pxp_agp_scaling.py --mode hxz --l-values 10 12 --hxz-min 0.0 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Iterable
 
@@ -24,19 +23,33 @@ import numpy as np
 from quspin.operators import hamiltonian
 
 try:
-    import cupy as cp
+    import cupy as cp  # pyright: ignore[reportMissingImports]
 except ImportError:
     cp = None
 
-# Add PXP_infra to path
+import sys
+
+# Add PXP_infra to path for its internal bare imports.
 sys.path.insert(0, str(Path(__file__).parent / "PXP_infra"))
 
-from diag import GetBasis, GetHam
+from diag import GetBasis, GetHam  # pyright: ignore[reportMissingImports]
 import os
 import json
 import hashlib
 import time
 from typing import Dict, Tuple
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+FIG_DIR = ROOT_DIR / "fig"
+RES_DIR = ROOT_DIR / "res"
+
+
+def _fig_output_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    if path.parts and path.parts[0].lower() == "fig":
+        return ROOT_DIR / path
+    return FIG_DIR / path
 
 
 def _get_array_module(backend: str):
@@ -422,6 +435,7 @@ def plot_pxp_spacing_series(results: dict[int, list[tuple[float, float]]], outpu
     ax.grid(True, linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, ncol=2)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
     print(f"Saved plot to {output_path}")
 
@@ -579,8 +593,8 @@ def compute_pxp_agp_size_series(
 
 
 def _make_cache_path(mode: str, params: dict) -> Path:
-    cache_dir = Path("res")
-    cache_dir.mkdir(exist_ok=True)
+    cache_dir = RES_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
     # create deterministic json and hash it for filename
     j = json.dumps(params, sort_keys=True)
     h = hashlib.sha1(j.encode()).hexdigest()[:16]
@@ -672,6 +686,7 @@ def plot_pxp_agp_series(results: dict[int, list[tuple[float, float]]], output_pa
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, ncol=2)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
     print(f"Saved plot to {output_path}")
 
@@ -692,6 +707,7 @@ def plot_pxp_chi_typ_series(results: dict[int, list[tuple[float, float]]], outpu
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, ncol=2)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
     print(f"Saved plot to {output_path}")
 
@@ -749,6 +765,7 @@ def plot_pxp_agp_normalized_log_series(results: dict[int, list[tuple[float, floa
     ax2.set_title("Intercept of log(AGP/(L D)) vs system size")
     ax2.grid(True, linestyle=":", linewidth=0.7, alpha=0.7)
     
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
     print(f"Saved plot to {output_path}")
     
@@ -782,6 +799,7 @@ def plot_pxp_agp_size_series(results: list[tuple[int, float, int]], output_path:
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
     print(f"Saved plot to {output_path}")
 
@@ -864,25 +882,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("pxp_agp_scaling.png"),
+        default=FIG_DIR / "pxp_agp_scaling.png",
         help="Output image path.",
     )
     parser.add_argument(
         "--spectral-output",
         type=Path,
-        default=Path("pxp_spectral_weight.png"),
+        default=FIG_DIR / "pxp_spectral_weight.png",
         help="Output image path for the spectral-weight plot.",
     )
     parser.add_argument(
         "--spacing-output",
         type=Path,
-        default=Path("pxp_spacing_ratio.png"),
+        default=FIG_DIR / "pxp_spacing_ratio.png",
         help="Output image path for the level-spacing-ratio plot.",
     )
     parser.add_argument(
         "--chi-typ-output",
         type=Path,
-        default=Path("pxp_chi_typ.png"),
+        default=FIG_DIR / "pxp_chi_typ.png",
         help="Output image path for the typical-susceptibility plot.",
     )
     parser.add_argument(
@@ -902,6 +920,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    args.output = _fig_output_path(args.output)
+    args.spectral_output = _fig_output_path(args.spectral_output)
+    args.spacing_output = _fig_output_path(args.spacing_output)
+    args.chi_typ_output = _fig_output_path(args.chi_typ_output)
 
     symmetry = (False, args.inv_sector) if args.inv_sector is not None else (False, False)
 

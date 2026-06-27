@@ -34,6 +34,8 @@ import numpy as np
 from quspin.basis import spin_basis_1d
 from quspin.operators import hamiltonian
 
+FIG_DIR = Path(__file__).resolve().parent.parent / "fig"
+
 
 @dataclass(frozen=True)
 class ModelData:
@@ -153,6 +155,7 @@ def plot_results(results: dict[float, list[tuple[int, float]]], output_path: Pat
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, ncol=2)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=200)
 
 
@@ -181,7 +184,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("fig11_agp_scaling.png"),
+        default=FIG_DIR / "fig11_agp_scaling.png",
         help="Output image path.",
     )
     return parser.parse_args()

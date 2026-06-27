@@ -1,2 +1,12 @@
+archive/
+articles/
+fig/*
+!fig/.gitkeep
+res/*
+!res/.gitkeep
+*.csv
+*.npz
 *.pdf
+*.png
 *.txt
+__pycache__/

@@ -24,6 +24,8 @@ import numpy as np
 from quspin.basis import spin_basis_1d
 from quspin.operators import hamiltonian
 
+FIG_DIR = Path(__file__).resolve().parent.parent / "fig"
+
 
 def build_xxz_with_defect(l: int, delta: float, eps_d: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return dense H, dH/dDelta, and V (defect operator) for given params.
@@ -147,6 +149,7 @@ def compute_and_plot_fig6(
     ax.set_title("Fig. 6 reproduction: spectral weight for integrable perturbation (\lambda=\Delta)")
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, fontsize="small", ncol=2)
+    output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=200)
     print(f"Saved {output}")
 
@@ -212,6 +215,7 @@ def compute_and_plot_fig7(
     ax.grid(True, which="both", linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, fontsize="small")
 
+    output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=200)
     print(f"Saved {output}")
 
@@ -228,8 +232,8 @@ def parse_args():
         default="auto",
         help="Extensivity normalization: auto (divide by L only for extensive perturbations), on (always), off (never)",
     )
-    p.add_argument("--output6", type=Path, default=Path("fig6_spectral.png"))
-    p.add_argument("--output7", type=Path, default=Path("fig7_spectral.png"))
+    p.add_argument("--output6", type=Path, default=FIG_DIR / "fig6_spectral.png")
+    p.add_argument("--output7", type=Path, default=FIG_DIR / "fig7_spectral.png")
     return p.parse_args()
 
 
