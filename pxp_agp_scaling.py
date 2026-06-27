@@ -23,6 +23,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from quspin.operators import hamiltonian
 
+try:
+    import cupy as cp
+except ImportError:
+    cp = None
+
 # Add PXP_infra to path
 sys.path.insert(0, str(Path(__file__).parent / "PXP_infra"))
 
@@ -34,10 +39,43 @@ import time
 from typing import Dict, Tuple
 
 
+def _get_array_module(backend: str):
+    if backend == "gpu":
+        if cp is None:
+            raise RuntimeError("CuPy is not available in this environment, but --backend gpu was requested.")
+        return cp
+    return np
+
+
+def _to_numpy(array, backend: str):
+    if backend == "gpu":
+        return cp.asnumpy(array)
+    return np.asarray(array)
+
+
+def eigh_backend(matrix: np.ndarray, backend: str = "cpu") -> tuple[np.ndarray, np.ndarray]:
+    xp = _get_array_module(backend)
+    if xp is np:
+        evals, evecs = np.linalg.eigh(matrix)
+    else:
+        evals, evecs = xp.linalg.eigh(xp.asarray(matrix))
+    return _to_numpy(evals, backend), _to_numpy(evecs, backend)
+
+
+def eigvalsh_backend(matrix: np.ndarray, backend: str = "cpu") -> np.ndarray:
+    xp = _get_array_module(backend)
+    if xp is np:
+        evals = np.linalg.eigvalsh(matrix)
+    else:
+        evals = xp.linalg.eigvalsh(xp.asarray(matrix))
+    return _to_numpy(evals, backend)
+
+
 def regularized_agp_norm_pxp(
     h_base: np.ndarray,
     dh_dhxz: np.ndarray,
     mu: float,
+    backend: str = "cpu",
 ) -> float:
     """Compute regularized AGP norm for hxz coupling.
 
@@ -51,21 +89,32 @@ def regularized_agp_norm_pxp(
     """
 
     # Diagonalize the base Hamiltonian
-    evals, evecs = np.linalg.eigh(h_base)
-    dh_eig = evecs.conj().T @ dh_dhxz @ evecs
+    xp = _get_array_module(backend)
+    h_base_xp = xp.asarray(h_base) if backend == "gpu" else h_base
+    dh_dhxz_xp = xp.asarray(dh_dhxz) if backend == "gpu" else dh_dhxz
+
+    evals, evecs = eigh_backend(h_base_xp, backend=backend)
+    if backend == "gpu":
+        evals = xp.asarray(evals)
+        evecs = xp.asarray(evecs)
+        dh_dhxz_xp = xp.asarray(dh_dhxz_xp)
+    dh_eig = evecs.conj().T @ dh_dhxz_xp @ evecs
 
     # Compute the weighted sum (regularized AGP formula)
     omega = evals[:, None] - evals[None, :]
     weight = (omega * omega) / (omega * omega + mu * mu) ** 2
-    np.fill_diagonal(weight, 0.0)
+    xp.fill_diagonal(weight, 0.0)
 
-    norm = np.sum(np.abs(dh_eig) ** 2 * weight) / h_base.shape[0]
+    norm = xp.sum(xp.abs(dh_eig) ** 2 * weight) / h_base.shape[0]
+    if backend == "gpu":
+        norm = cp.asnumpy(norm)
     return float(np.real_if_close(norm))
 
 
 def typical_susceptibility_pxp(
     h_base: np.ndarray,
-    dh_dhxz: np.ndarray
+    dh_dhxz: np.ndarray,
+    backend: str = "cpu",
 ) -> float:
     """Compute the typical susceptibility over eigenstates.
 
@@ -73,16 +122,23 @@ def typical_susceptibility_pxp(
     chi_typ = exp(average(log(chi_n)))
     """
 
-    evals, evecs = np.linalg.eigh(h_base)
-    dh_eig = evecs.conj().T @ dh_dhxz @ evecs
+    xp = _get_array_module(backend)
+    h_base_xp = xp.asarray(h_base) if backend == "gpu" else h_base
+    dh_dhxz_xp = xp.asarray(dh_dhxz) if backend == "gpu" else dh_dhxz
+
+    evals, evecs = eigh_backend(h_base_xp, backend=backend)
+    if backend == "gpu":
+        evecs = xp.asarray(evecs)
+        dh_dhxz_xp = xp.asarray(dh_dhxz_xp)
+    dh_eig = evecs.conj().T @ dh_dhxz_xp @ evecs
 
     omega = evals[:, None] - evals[None, :]
     with np.errstate(divide="ignore", invalid="ignore"):
-        chi_matrix = np.abs(dh_eig) ** 2 / (omega * omega)
-    np.fill_diagonal(chi_matrix, 0.0)
+        chi_matrix = xp.abs(dh_eig) ** 2 / (omega * omega)
+    xp.fill_diagonal(chi_matrix, 0.0)
 
-    chi_n = np.sum(chi_matrix, axis=1)
-    chi_n = np.asarray(chi_n, dtype=float)
+    chi_n = xp.sum(chi_matrix, axis=1)
+    chi_n = _to_numpy(chi_n, backend).astype(float, copy=False)
     chi_n = chi_n[np.isfinite(chi_n) & (chi_n > 0.0)]
     if chi_n.size == 0:
         return float("nan")
@@ -95,6 +151,7 @@ def compute_pxp_agp_series(
     hxz_values: Iterable[float],
     symmetry: tuple = (False, False),
     boundary: str = "OBC",
+    backend: str = "cpu",
 ) -> dict[int, list[tuple[float, float]]]:
     """Compute AGP norm versus hxz for several fixed system sizes.
 
@@ -144,7 +201,7 @@ def compute_pxp_agp_series(
             h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
 
             # Compute regularized AGP norm at this hxz value.
-            norm_sq = regularized_agp_norm_pxp(h_base_dense, dh_dhxz_dense, mu)
+            norm_sq = regularized_agp_norm_pxp(h_base_dense, dh_dhxz_dense, mu, backend=backend)
             norm_sq_per_ld = norm_sq / (l * basis_dim)
 
             results[l].append((hxz, norm_sq_per_ld))
@@ -163,6 +220,7 @@ def compute_pxp_chi_typ_series(
     hxz_values: Iterable[float],
     symmetry: tuple = (False, False),
     boundary: str = "OBC",
+    backend: str = "cpu",
 ) -> dict[int, list[tuple[float, float]]]:
     """Compute typical susceptibility/(L D) versus hxz for several fixed system sizes."""
 
@@ -200,7 +258,7 @@ def compute_pxp_chi_typ_series(
             h_base = GetHam(gen_dict, basis)
             h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
 
-            chi_typ = typical_susceptibility_pxp(h_base_dense, dh_dhxz_dense)
+            chi_typ = typical_susceptibility_pxp(h_base_dense, dh_dhxz_dense, backend=backend)
             chi_typ_per_ld = chi_typ / (l * basis_dim)
             results[l].append((hxz, chi_typ_per_ld))
             # print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, chi_typ/(L D)={chi_typ_per_ld:.6e}")
@@ -213,25 +271,42 @@ def compute_pxp_chi_typ_series(
     return results
 
 
-def spectral_weight_from_matrix(h: np.ndarray, dh: np.ndarray, mu: float, omega_grid: np.ndarray) -> np.ndarray:
+def spectral_weight_from_matrix(
+    h: np.ndarray,
+    dh: np.ndarray,
+    mu: float,
+    omega_grid: np.ndarray,
+    backend: str = "cpu",
+) -> np.ndarray:
     """Compute |f_lambda(omega)|^2 on omega_grid using Lorentzian broadening mu."""
 
-    evals, evecs = np.linalg.eigh(h)
-    dh_eig = evecs.conj().T @ dh @ evecs
+    xp = _get_array_module(backend)
+    h_xp = xp.asarray(h) if backend == "gpu" else h
+    dh_xp = xp.asarray(dh) if backend == "gpu" else dh
+    omega_grid_xp = xp.asarray(omega_grid) if backend == "gpu" else omega_grid
+
+    evals, evecs = eigh_backend(h_xp, backend=backend)
+    if backend == "gpu":
+        evals = xp.asarray(evals)
+        evecs = xp.asarray(evecs)
+        dh_xp = xp.asarray(dh_xp)
+        omega_grid_xp = xp.asarray(omega_grid_xp)
+
+    dh_eig = evecs.conj().T @ dh_xp @ evecs
 
     omegas = (evals[:, None] - evals[None, :]).reshape(-1)
-    m2 = np.abs(dh_eig) ** 2
-    np.fill_diagonal(m2, 0.0)
+    m2 = xp.abs(dh_eig) ** 2
+    xp.fill_diagonal(m2, 0.0)
     m2_flat = m2.reshape(-1)
 
     D = h.shape[0]
-    spectral = np.zeros_like(omega_grid, dtype=float)
-    for idx, omega in enumerate(omega_grid):
+    spectral = xp.zeros_like(omega_grid_xp, dtype=float)
+    for idx, omega in enumerate(omega_grid_xp):
         x = omega - omegas
         lorentz = (1.0 / np.pi) * (mu / (x * x + mu * mu))
-        spectral[idx] = (1.0 / D) * np.sum(m2_flat * lorentz)
+        spectral[idx] = (1.0 / D) * xp.sum(m2_flat * lorentz)
 
-    return spectral
+    return _to_numpy(spectral, backend).astype(float, copy=False)
 
 
 def mean_level_spacing_ratio(evals: np.ndarray) -> float:
@@ -276,6 +351,7 @@ def compute_pxp_spacing_series(
     hxz_values: Iterable[float],
     symmetry: tuple = (False, 0),
     boundary: str = "OBC",
+    backend: str = "cpu",
 ) -> dict[int, list[tuple[float, float]]]:
     """Compute mean level-spacing ratio versus hxz for several system sizes."""
 
@@ -293,7 +369,7 @@ def compute_pxp_spacing_series(
             gen_dict["hxz"] = hxz
             h_base = GetHam(gen_dict, basis)
             h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
-            evals = np.linalg.eigvalsh(h_base_dense)
+            evals = eigvalsh_backend(h_base_dense, backend=backend)
             r_mean = mean_level_spacing_ratio_middle_third(evals)
             results[l].append((hxz, r_mean))
             # print(f"L={l:2d}, hxz={hxz: .5f}, D={basis_dim:6d}, <r>_mid={r_mean:.6e}")
@@ -356,6 +432,7 @@ def compute_pxp_spectral_series(
     bins: int = 200,
     symmetry: tuple = (False, False),
     boundary: str = "OBC",
+    backend: str = "cpu",
 ) -> dict[int, tuple[np.ndarray, np.ndarray]]:
     """Compute spectral weight |f_{h_xz}(omega)|^2 vs omega for fixed hxz."""
 
@@ -393,12 +470,12 @@ def compute_pxp_spectral_series(
 
         # mu = l * 2 ** (-l)
         mu = l / basis_dim
-        evals = np.linalg.eigvalsh(h_base_dense)
+        evals = eigvalsh_backend(h_base_dense, backend=backend)
         max_omega = float(np.max(evals) - np.min(evals))
         omega_min = max(mu * 1e-1, 1e-12)
         omega_grid = np.logspace(np.log10(omega_min), np.log10(max_omega + 1e-12), bins)
 
-        spectral = spectral_weight_from_matrix(h_base_dense, dh_dhxz_dense, mu, omega_grid)
+        spectral = spectral_weight_from_matrix(h_base_dense, dh_dhxz_dense, mu, omega_grid, backend=backend)
         spectral /= l  # normalize by L for comparison across sizes
         results[int(l)] = (omega_grid, spectral)
         print(f"Computed spectral L={l}, hxz={hxz:.5f}, D={basis_dim:6d}")
@@ -450,6 +527,7 @@ def compute_pxp_agp_size_series(
     hxz: float = 0.0,
     symmetry: tuple = (False, False),
     boundary: str = "OBC",
+    backend: str = "cpu",
 ) -> list[tuple[int, float, int]]:
     """Compute AGP norm versus system size at a fixed hxz value.
 
@@ -488,7 +566,7 @@ def compute_pxp_agp_size_series(
         h_base_dense = np.asarray(h_base.toarray(), dtype=np.float64)
 
         mu = l / basis_dim
-        norm_sq = regularized_agp_norm_pxp(h_base_dense, dh_dhxz_dense, mu)
+        norm_sq = regularized_agp_norm_pxp(h_base_dense, dh_dhxz_dense, mu, backend=backend)
         norm_sq_per_ld = norm_sq / (l * basis_dim)
 
         results.append((l, norm_sq_per_ld, basis_dim))
@@ -773,6 +851,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional inversion-parity sector; pass 0 or 1 to use that symmetry sector.",
     )
     parser.add_argument(
+        "--backend",
+        choices=["cpu", "gpu"],
+        default="cpu",
+        help="Linear-algebra backend for eigenvalue decompositions.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Bypass cached results and recompute.",
@@ -855,6 +939,7 @@ def main() -> None:
                 symmetry=symmetry,
                 boundary=args.boundary,
                 hxz_values=hxz_values,
+                backend=args.backend,
             )
             save_hxz_results(results, cache_path)
 
@@ -879,6 +964,7 @@ def main() -> None:
                 hxz=args.hxz_fixed,
                 symmetry=symmetry,
                 boundary=args.boundary,
+                backend=args.backend,
             )
             save_size_results(results, cache_path)
 
@@ -906,6 +992,7 @@ def main() -> None:
                 bins=spectral_bins,
                 symmetry=symmetry,
                 boundary=args.boundary,
+                backend=args.backend,
             )
             save_spectral_results(spectral_results, spectral_cache_path)
 
@@ -935,6 +1022,7 @@ def main() -> None:
                 hxz_values=hxz_values,
                 symmetry=(False, 0),
                 boundary=args.boundary,
+                backend=args.backend,
             )
             save_spacing_results(spacing_results, spacing_cache_path)
 
@@ -964,6 +1052,7 @@ def main() -> None:
                 hxz_values=hxz_values,
                 symmetry=symmetry,
                 boundary=args.boundary,
+                backend=args.backend,
             )
             save_chi_typ_results(chi_results, chi_cache_path)
 
