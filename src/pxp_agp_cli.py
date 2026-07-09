@@ -266,7 +266,12 @@ def _run_generic_1d_sweep(
             coupling_label=spec.coupling_label,
         )
     elif calc == "spacing":
-        plot_pxp_spacing_series(results, output_path)
+        plot_pxp_spacing_series(
+            results,
+            output_path,
+            perturbation_label=spec.display_name,
+            coupling_label=spec.coupling_label
+        )
     else:
         raise ValueError(f"Unsupported 1d calc: {calc}")
 
