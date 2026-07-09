@@ -12,7 +12,7 @@ exit /b %EXITCODE%
 echo Usage: %~nx0 [options]
 echo.
 echo Mode: 1d
-echo Parameters: --operator --coupling-min --coupling-max --coupling-count --output --boundary --inv-sector --backend --force
-echo Example: %~nx0 --operator ss --l-values 14 16 18 20 --coupling-min 0.0 --coupling-max 0.25 --coupling-count 9 --output pxp_ss_scaling.png --backend cpu --inv-sector 0
+echo Parameters: --operator --calc --coupling-min --coupling-max --coupling-count --output --boundary --inv-sector --backend --force
+echo Example: %~nx0 --operator ss --calc spacing --l-values 14 16 18 20 --coupling-min 0.0 --coupling-max 0.25 --coupling-count 9 --output pxp_ss_spacing.png --backend cpu --inv-sector 0
 echo.
 exit /b 0

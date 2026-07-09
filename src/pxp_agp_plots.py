@@ -8,19 +8,25 @@ import numpy as np
 from pxp_agp_common import save_figure
 
 
-def plot_pxp_spacing_series(results: dict[int, list[tuple[float, float]]], output_path: Path) -> None:
+def plot_pxp_spacing_series(
+    results: dict[int, list[tuple[float, float]]],
+    output_path: Path,
+    *,
+    perturbation_label: str = "PXPZ",
+    coupling_label: str = r"h_{xz}",
+) -> None:
     fig, ax = plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
 
     for l, points in results.items():
-        hxz_values = np.array([p[0] for p in points], dtype=float)
+        coupling_values = np.array([p[0] for p in points], dtype=float)
         r_values = np.array([p[1] for p in points], dtype=float)
-        ax.plot(hxz_values, r_values, marker="o", linewidth=2.0, markersize=6, label=fr"$L={l}$")
+        ax.plot(coupling_values, r_values, marker="o", linewidth=2.0, markersize=6, label=fr"$L={l}$")
 
-    ax.set_xlabel(r"Coupling $h_{xz}$")
+    ax.set_xlabel(fr"Coupling ${coupling_label}$")
     ax.set_ylabel(r"Mean level spacing ratio $\langle r \rangle$")
     ax.axhline(0.386, color="gray", linestyle="--", linewidth=1.0, alpha=0.7, label="Poisson")
     ax.axhline(0.530, color="gray", linestyle=":", linewidth=1.0, alpha=0.7, label="GOE")
-    ax.set_title("PXPZ model: mean level spacing ratio versus $h_{xz}$")
+    ax.set_title(fr"{perturbation_label} model: mean level spacing ratio versus ${coupling_label}$")
     ax.grid(True, linestyle=":", linewidth=0.7, alpha=0.7)
     ax.legend(frameon=False, ncol=2)
 

@@ -59,6 +59,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Perturbation kind for 1d mode, for example hxz, z, zz, or ss.",
     )
+    parser.add_argument(
+        "--calc",
+        choices=["agp", "spacing"],
+        default="agp",
+        help="Quantity to compute in 1d mode.",
+    )
     parser.add_argument("--l-values", type=int, nargs="+", default=[10, 12, 14, 16], help="System sizes to use.")
     parser.add_argument("--hxz-fixed", type=float, default=0.0, help="Fixed hxz value for size-scaling mode.")
     parser.add_argument("--hxz-min", type=float, default=0.0, help="Minimum hxz value in the sweep.")
@@ -120,7 +126,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--backend", choices=["cpu", "gpu"], default="cpu", help="Linear-algebra backend.")
     parser.add_argument("--force", action="store_true", help="Bypass cached results and recompute.")
-    parser.add_argument("--output", type=Path, default=FIG_DIR / "pxp_agp_scaling.png", help="Output image path.")
+    parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults depend on the selected mode.")
     parser.add_argument(
         "--spectral-output",
         type=Path,
@@ -142,7 +148,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--z-output",
         type=Path,
-        default=None,
+        default=FIG_DIR / "pxp_z_scaling.png",
         help="Output image path. Defaults depend on the selected mode.",
     )
     parser.add_argument(
@@ -191,6 +197,7 @@ def _run_generic_1d_sweep(
     coupling_min: float,
     coupling_max: float,
     coupling_count: int,
+    calc: str,
     output_path: Path | None,
 ) -> None:
     spec = get_perturbation_spec(operator_name)
@@ -199,7 +206,8 @@ def _run_generic_1d_sweep(
         raise ValueError("No coupling values selected.")
 
     if output_path is None:
-        output_path = fig_output_path(FIG_DIR / f"pxp_{spec.cache_tag}_scaling.png")
+        suffix = "spacing" if calc == "spacing" else "scaling"
+        output_path = fig_output_path(FIG_DIR / f"pxp_{spec.cache_tag}_{suffix}.png")
 
     print(
         f"Sweeping {spec.coupling_name} over {coupling_values[0]:.5f} to {coupling_values[-1]:.5f} "
@@ -212,37 +220,55 @@ def _run_generic_1d_sweep(
         coupling_count=int(len(coupling_values)),
         boundary=boundary,
         perturbation=spec.cache_tag,
+        calc=calc,
     )
     params = cache_params_with_inv_sector(params, inv_sector)
-    cache_path = make_cache_path(spec.cache_tag, params)
+    cache_path = make_cache_path(f"{spec.cache_tag}_{calc}", params)
     if (not force) and cache_path.exists():
-        print(f"Loading cached {spec.cache_tag} results from {cache_path}")
+        print(f"Loading cached {spec.cache_tag} {calc} results from {cache_path}")
         results = load_hxz_results(cache_path)
     else:
-        results = compute_pxp_agp_series(
-            l_values,
-            coupling_values=coupling_values,
-            symmetry=symmetry,
-            boundary=boundary,
-            backend=backend,
-            perturbation_kind=spec.kind,
-        )
+        if calc == "agp":
+            results = compute_pxp_agp_series(
+                l_values,
+                coupling_values=coupling_values,
+                symmetry=symmetry,
+                boundary=boundary,
+                backend=backend,
+                perturbation_kind=spec.kind,
+            )
+        elif calc == "spacing":
+            results = compute_pxp_spacing_series(
+                l_values,
+                coupling_values=coupling_values,
+                symmetry=symmetry,
+                boundary=boundary,
+                backend=backend,
+                perturbation_kind=spec.kind,
+            )
+        else:
+            raise ValueError(f"Unsupported 1d calc: {calc}")
         save_hxz_results(results, cache_path)
-        print(f"Saved {spec.cache_tag} cache to {cache_path}")
+        print(f"Saved {spec.cache_tag} {calc} cache to {cache_path}")
 
-    plot_pxp_agp_series(
-        results,
-        output_path,
-        perturbation_label=spec.display_name,
-        coupling_label=spec.coupling_label,
-    )
-    log_output = output_path.parent / f"{output_path.stem}_fit{output_path.suffix}"
-    plot_pxp_agp_normalized_log_series(
-        results,
-        log_output,
-        perturbation_label=spec.display_name,
-        coupling_label=spec.coupling_label,
-    )
+    if calc == "agp":
+        plot_pxp_agp_series(
+            results,
+            output_path,
+            perturbation_label=spec.display_name,
+            coupling_label=spec.coupling_label,
+        )
+        log_output = output_path.parent / f"{output_path.stem}_fit{output_path.suffix}"
+        plot_pxp_agp_normalized_log_series(
+            results,
+            log_output,
+            perturbation_label=spec.display_name,
+            coupling_label=spec.coupling_label,
+        )
+    elif calc == "spacing":
+        plot_pxp_spacing_series(results, output_path)
+    else:
+        raise ValueError(f"Unsupported 1d calc: {calc}")
 
 
 def main() -> None:
@@ -282,6 +308,7 @@ def main() -> None:
             coupling_min=args.coupling_min,
             coupling_max=args.coupling_max,
             coupling_count=args.coupling_count,
+            calc=args.calc,
             output_path=output_path,
         )
         return
