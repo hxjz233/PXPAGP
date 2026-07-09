@@ -93,6 +93,14 @@ def get_perturbation_spec(kind: str) -> PerturbationSpec:
             coupling_label=r"h_{zz}",
             display_name="PXPZ with ZZ perturbation",
         )
+    if normalized in {"ss", "hss"}:
+        return PerturbationSpec(
+            kind="ss",
+            cache_tag="ss",
+            coupling_name="hss",
+            coupling_label=r"h_{ss}",
+            display_name="PXPZ with SS perturbation",
+        )
     raise ValueError(f"Unsupported perturbation kind: {kind}")
 
 
@@ -153,6 +161,9 @@ def build_perturbation_term_lists(
         return [("z", [[coupling, i] for i in range(l)])]
     if spec.kind == "zz":
         return _scale_term_lists(build_single_offset_term_list(l, boundary, "zz", offset=2), coupling)
+    if spec.kind == "ss":
+        term_specs = build_offset_term_lists(l, boundary, "xx", "yy", offset=1)
+        return _scale_term_lists(term_specs, 2.0 * coupling)
     raise ValueError(f"Unsupported perturbation kind: {perturbation_kind}")
 
 
@@ -218,6 +229,10 @@ def build_z_operator_dense(basis: object, l: int, boundary: str) -> np.ndarray:
 
 def build_zz_operator_dense(basis: object, l: int, boundary: str) -> np.ndarray:
     return build_perturbation_operator_dense(basis, l, boundary, "zz")
+
+
+def build_ss_operator_dense(basis: object, l: int, boundary: str) -> np.ndarray:
+    return build_perturbation_operator_dense(basis, l, boundary, "ss")
 
 
 def prepare_perturbation_context(
