@@ -18,6 +18,7 @@ from pxp_agp_common import (
     save_grouped_xy_series,
     save_size_series,
     save_spectral_series,
+    to_numpy,
 )
 
 
@@ -27,7 +28,7 @@ def eigh_backend(matrix: np.ndarray, backend: str = "cpu") -> tuple[np.ndarray, 
         evals, evecs = np.linalg.eigh(matrix)
     else:
         evals, evecs = xp.linalg.eigh(xp.asarray(matrix))
-    return np.asarray(evals), np.asarray(evecs)
+    return to_numpy(evals, backend), to_numpy(evecs, backend)
 
 
 def eigvalsh_backend(matrix: np.ndarray, backend: str = "cpu") -> np.ndarray:
@@ -36,7 +37,7 @@ def eigvalsh_backend(matrix: np.ndarray, backend: str = "cpu") -> np.ndarray:
         evals = np.linalg.eigvalsh(matrix)
     else:
         evals = xp.linalg.eigvalsh(xp.asarray(matrix))
-    return np.asarray(evals)
+    return to_numpy(evals, backend)
 
 
 def regularized_agp_norm_pxp(
@@ -87,7 +88,7 @@ def typical_susceptibility_pxp(
     xp.fill_diagonal(chi_matrix, 0.0)
 
     chi_n = xp.sum(chi_matrix, axis=1)
-    chi_n = np.asarray(chi_n, dtype=float)
+    chi_n = to_numpy(chi_n, backend).astype(float, copy=False)
     chi_n = chi_n[np.isfinite(chi_n) & (chi_n > 0.0)]
     if chi_n.size == 0:
         return float("nan")
@@ -128,7 +129,7 @@ def spectral_weight_from_matrix(
         lorentz = (1.0 / np.pi) * (mu / (x * x + mu * mu))
         spectral[idx] = (1.0 / D) * xp.sum(m2_flat * lorentz)
 
-    return np.asarray(spectral, dtype=float)
+    return to_numpy(spectral, backend).astype(float, copy=False)
 
 
 def mean_level_spacing_ratio(evals: np.ndarray) -> float:
