@@ -83,7 +83,7 @@ def get_perturbation_spec(kind: str) -> PerturbationSpec:
             cache_tag="z",
             coupling_name="hz",
             coupling_label=r"h_z",
-            display_name="PXPZ with Z perturbation",
+            display_name="PXP with Z perturbation",
         )
     if normalized in {"zz", "hzz"}:
         return PerturbationSpec(
@@ -91,7 +91,7 @@ def get_perturbation_spec(kind: str) -> PerturbationSpec:
             cache_tag="zz",
             coupling_name="hzz",
             coupling_label=r"h_{zz}",
-            display_name="PXPZ with ZZ perturbation",
+            display_name="PXP with ZZ perturbation",
         )
     if normalized in {"ss", "hss"}:
         return PerturbationSpec(
@@ -99,7 +99,7 @@ def get_perturbation_spec(kind: str) -> PerturbationSpec:
             cache_tag="ss",
             coupling_name="hss",
             coupling_label=r"h_{ss}",
-            display_name="PXPZ with SS perturbation",
+            display_name="PXP with SS perturbation",
         )
     raise ValueError(f"Unsupported perturbation kind: {kind}")
 
