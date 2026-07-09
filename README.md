@@ -17,6 +17,7 @@ This repo is centered on `src/pxp_agp_scaling.py`. The `src/PXP_infra/` package 
 The batch files in `scripts/` activate the local `quspin` environment and call the `src/` entrypoint:
 
 - `scripts/run_hxz.bat`
+- `scripts/run_z.bat`
 - `scripts/run_size.bat`
 - `scripts/run_spectral.bat`
 - `scripts/run_spacing.bat`
