@@ -49,9 +49,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["hxz", "z", "zz", "ss", "size", "spectral", "spacing", "typical"],
+        choices=["1d", "hxz", "z", "zz", "ss", "size", "spectral", "spacing", "typical"],
         default="hxz",
         help="Plot AGP versus a perturbation coupling, AGP versus L, standalone spectral function, or mean level-spacing ratio.",
+    )
+    parser.add_argument(
+        "--operator",
+        type=str,
+        default=None,
+        help="Perturbation kind for 1d mode, for example hxz, z, zz, or ss.",
     )
     parser.add_argument("--l-values", type=int, nargs="+", default=[10, 12, 14, 16], help="System sizes to use.")
     parser.add_argument("--hxz-fixed", type=float, default=0.0, help="Fixed hxz value for size-scaling mode.")
@@ -67,6 +73,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ss-min", type=float, default=0.0, help="Minimum ss-coupling value in the sweep.")
     parser.add_argument("--ss-max", type=float, default=0.25, help="Maximum ss-coupling value in the sweep.")
     parser.add_argument("--ss-count", type=int, default=9, help="Number of ss-coupling points in the sweep.")
+    parser.add_argument(
+        "--coupling-min",
+        type=float,
+        default=0.0,
+        help="Minimum coupling value for 1d mode.",
+    )
+    parser.add_argument(
+        "--coupling-max",
+        type=float,
+        default=0.25,
+        help="Maximum coupling value for 1d mode.",
+    )
+    parser.add_argument(
+        "--coupling-count",
+        type=int,
+        default=9,
+        help="Number of coupling points for 1d mode.",
+    )
     parser.add_argument(
         "--hxz-shard-index",
         type=int,
@@ -118,8 +142,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--z-output",
         type=Path,
-        default=FIG_DIR / "pxp_z_scaling.png",
-        help="Output image path for the Z-perturbation plot.",
+        default=None,
+        help="Output image path. Defaults depend on the selected mode.",
     )
     parser.add_argument(
         "--zz-output",
@@ -155,17 +179,89 @@ def _selected_l_values(args: argparse.Namespace) -> list[int]:
     return l_values
 
 
+def _run_generic_1d_sweep(
+    *,
+    l_values: list[int],
+    symmetry: tuple,
+    boundary: str,
+    backend: str,
+    force: bool,
+    inv_sector: int | None,
+    operator_name: str,
+    coupling_min: float,
+    coupling_max: float,
+    coupling_count: int,
+    output_path: Path | None,
+) -> None:
+    spec = get_perturbation_spec(operator_name)
+    coupling_values = np.linspace(coupling_min, coupling_max, coupling_count)
+    if len(coupling_values) == 0:
+        raise ValueError("No coupling values selected.")
+
+    if output_path is None:
+        output_path = fig_output_path(FIG_DIR / f"pxp_{spec.cache_tag}_scaling.png")
+
+    print(
+        f"Sweeping {spec.coupling_name} over {coupling_values[0]:.5f} to {coupling_values[-1]:.5f} "
+        f"in {len(coupling_values)} steps"
+    )
+    params = dict(
+        l_values=list(l_values),
+        coupling_min=float(coupling_values[0]),
+        coupling_max=float(coupling_values[-1]),
+        coupling_count=int(len(coupling_values)),
+        boundary=boundary,
+        perturbation=spec.cache_tag,
+    )
+    params = cache_params_with_inv_sector(params, inv_sector)
+    cache_path = make_cache_path(spec.cache_tag, params)
+    if (not force) and cache_path.exists():
+        print(f"Loading cached {spec.cache_tag} results from {cache_path}")
+        results = load_hxz_results(cache_path)
+    else:
+        results = compute_pxp_agp_series(
+            l_values,
+            coupling_values=coupling_values,
+            symmetry=symmetry,
+            boundary=boundary,
+            backend=backend,
+            perturbation_kind=spec.kind,
+        )
+        save_hxz_results(results, cache_path)
+        print(f"Saved {spec.cache_tag} cache to {cache_path}")
+
+    plot_pxp_agp_series(
+        results,
+        output_path,
+        perturbation_label=spec.display_name,
+        coupling_label=spec.coupling_label,
+    )
+    log_output = output_path.parent / f"{output_path.stem}_fit{output_path.suffix}"
+    plot_pxp_agp_normalized_log_series(
+        results,
+        log_output,
+        perturbation_label=spec.display_name,
+        coupling_label=spec.coupling_label,
+    )
+
+
 def main() -> None:
     args = parse_args()
     print(f"Using {CPUNUM} CPU thread(s) for linear algebra")
 
-    args.output = fig_output_path(args.output)
-    args.spectral_output = fig_output_path(args.spectral_output)
-    args.spacing_output = fig_output_path(args.spacing_output)
-    args.chi_typ_output = fig_output_path(args.chi_typ_output)
-    args.z_output = fig_output_path(args.z_output)
-    args.zz_output = fig_output_path(args.zz_output)
-    args.ss_output = fig_output_path(args.ss_output)
+    output_path = fig_output_path(args.output) if args.output is not None else None
+    if args.spectral_output is not None:
+        args.spectral_output = fig_output_path(args.spectral_output)
+    if args.spacing_output is not None:
+        args.spacing_output = fig_output_path(args.spacing_output)
+    if args.chi_typ_output is not None:
+        args.chi_typ_output = fig_output_path(args.chi_typ_output)
+    if args.z_output is not None:
+        args.z_output = fig_output_path(args.z_output)
+    if args.zz_output is not None:
+        args.zz_output = fig_output_path(args.zz_output)
+    if args.ss_output is not None:
+        args.ss_output = fig_output_path(args.ss_output)
 
     symmetry = (False, args.inv_sector) if args.inv_sector is not None else (False, False)
     l_values = _selected_l_values(args)
@@ -173,6 +269,22 @@ def main() -> None:
     z_spec = get_perturbation_spec("z")
     zz_spec = get_perturbation_spec("zz")
     ss_spec = get_perturbation_spec("ss")
+
+    if args.mode == "1d":
+        _run_generic_1d_sweep(
+            l_values=l_values,
+            symmetry=symmetry,
+            boundary=args.boundary,
+            backend=args.backend,
+            force=args.force,
+            inv_sector=args.inv_sector,
+            operator_name=args.operator or "hxz",
+            coupling_min=args.coupling_min,
+            coupling_max=args.coupling_max,
+            coupling_count=args.coupling_count,
+            output_path=output_path,
+        )
+        return
 
     if args.mode == "hxz":
         all_hxz_values = np.linspace(args.hxz_min, args.hxz_max, args.hxz_count)
@@ -200,8 +312,10 @@ def main() -> None:
             cache_path = make_cache_path("hxz", params)
             save_hxz_results(results, cache_path)
             print(f"Saved merged hxz cache to {cache_path}")
-            plot_pxp_agp_series(results, args.output)
-            log_output = args.output.parent / f"{args.output.stem}_fit{args.output.suffix}"
+            if output_path is None:
+                output_path = fig_output_path(FIG_DIR / "pxp_agp_scaling.png")
+            plot_pxp_agp_series(results, output_path)
+            log_output = output_path.parent / f"{output_path.stem}_fit{output_path.suffix}"
             plot_pxp_agp_normalized_log_series(
                 results,
                 log_output,
@@ -229,8 +343,10 @@ def main() -> None:
                 print(f"Saved shard cache to {cache_path}")
 
             if shard_count == 1:
-                plot_pxp_agp_series(results, args.output)
-                log_output = args.output.parent / f"{args.output.stem}_fit{args.output.suffix}"
+                if output_path is None:
+                    output_path = fig_output_path(FIG_DIR / "pxp_agp_scaling.png")
+                plot_pxp_agp_series(results, output_path)
+                log_output = output_path.parent / f"{output_path.stem}_fit{output_path.suffix}"
                 plot_pxp_agp_normalized_log_series(
                     results,
                     log_output,
@@ -391,7 +507,9 @@ def main() -> None:
             )
             save_size_results(results, cache_path)
 
-        plot_pxp_agp_size_series(results, args.output)
+        if output_path is None:
+            output_path = fig_output_path(FIG_DIR / "pxp_agp_scaling.png")
+        plot_pxp_agp_size_series(results, output_path)
     elif args.mode == "spectral":
         spectral_hxz = float(args.spectral_hxz)
         spectral_bins = int(args.spectral_bins)
