@@ -85,6 +85,14 @@ def get_perturbation_spec(kind: str) -> PerturbationSpec:
             coupling_label=r"h_z",
             display_name="PXPZ with Z perturbation",
         )
+    if normalized in {"zz", "hzz"}:
+        return PerturbationSpec(
+            kind="zz",
+            cache_tag="zz",
+            coupling_name="hzz",
+            coupling_label=r"h_{zz}",
+            display_name="PXPZ with ZZ perturbation",
+        )
     raise ValueError(f"Unsupported perturbation kind: {kind}")
 
 
@@ -107,6 +115,15 @@ def build_offset_term_lists(
         left_list = [[1.0, i - offset, i] for i in range(offset, l)]
         right_list = [[1.0, i, i + offset] for i in range(l - offset)]
     return [(left_op, left_list), (right_op, right_list)]
+
+
+def build_single_offset_term_list(l: int, boundary: str, op_name: str, offset: int = 2) -> list[tuple[str, list[list[float]]]]:
+    is_pbc = boundary == "PBC"
+    if is_pbc:
+        term_list = [[1.0, i, (i + offset) % l] for i in range(l)]
+    else:
+        term_list = [[1.0, i, i + offset] for i in range(l - offset)]
+    return [(op_name, term_list)]
 
 
 def _scale_term_lists(term_specs: list[tuple[str, list[list[float]]]], scale: float) -> list[tuple[str, list[list[float]]]]:
@@ -134,6 +151,8 @@ def build_perturbation_term_lists(
         return _scale_term_lists(term_specs, coupling)
     if spec.kind == "z":
         return [("z", [[coupling, i] for i in range(l)])]
+    if spec.kind == "zz":
+        return _scale_term_lists(build_single_offset_term_list(l, boundary, "zz", offset=2), coupling)
     raise ValueError(f"Unsupported perturbation kind: {perturbation_kind}")
 
 
@@ -195,6 +214,10 @@ def build_hxz_operator_dense(basis: object, l: int, boundary: str) -> np.ndarray
 
 def build_z_operator_dense(basis: object, l: int, boundary: str) -> np.ndarray:
     return build_perturbation_operator_dense(basis, l, boundary, "z")
+
+
+def build_zz_operator_dense(basis: object, l: int, boundary: str) -> np.ndarray:
+    return build_perturbation_operator_dense(basis, l, boundary, "zz")
 
 
 def prepare_perturbation_context(

@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=["hxz", "z", "size", "spectral", "spacing", "typical"],
+        choices=["hxz", "z", "zz", "size", "spectral", "spacing", "typical"],
         default="hxz",
         help="Plot AGP versus a perturbation coupling, AGP versus L, standalone spectral function, or mean level-spacing ratio.",
     )
@@ -61,6 +61,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--z-min", type=float, default=0.0, help="Minimum z-coupling value in the sweep.")
     parser.add_argument("--z-max", type=float, default=0.25, help="Maximum z-coupling value in the sweep.")
     parser.add_argument("--z-count", type=int, default=9, help="Number of z-coupling points in the sweep.")
+    parser.add_argument("--zz-min", type=float, default=0.0, help="Minimum zz-coupling value in the sweep.")
+    parser.add_argument("--zz-max", type=float, default=0.25, help="Maximum zz-coupling value in the sweep.")
+    parser.add_argument("--zz-count", type=int, default=9, help="Number of zz-coupling points in the sweep.")
     parser.add_argument(
         "--hxz-shard-index",
         type=int,
@@ -116,6 +119,12 @@ def parse_args() -> argparse.Namespace:
         help="Output image path for the Z-perturbation plot.",
     )
     parser.add_argument(
+        "--zz-output",
+        type=Path,
+        default=FIG_DIR / "pxp_zz_scaling.png",
+        help="Output image path for the ZZ-perturbation plot.",
+    )
+    parser.add_argument(
         "--spectral-bins",
         type=int,
         default=200,
@@ -146,11 +155,13 @@ def main() -> None:
     args.spacing_output = fig_output_path(args.spacing_output)
     args.chi_typ_output = fig_output_path(args.chi_typ_output)
     args.z_output = fig_output_path(args.z_output)
+    args.zz_output = fig_output_path(args.zz_output)
 
     symmetry = (False, args.inv_sector) if args.inv_sector is not None else (False, False)
     l_values = _selected_l_values(args)
     pxpz_spec = get_perturbation_spec("pxpz")
     z_spec = get_perturbation_spec("z")
+    zz_spec = get_perturbation_spec("zz")
 
     if args.mode == "hxz":
         all_hxz_values = np.linspace(args.hxz_min, args.hxz_max, args.hxz_count)
@@ -260,6 +271,50 @@ def main() -> None:
             log_output,
             perturbation_label=z_spec.display_name,
             coupling_label=z_spec.coupling_label,
+        )
+    elif args.mode == "zz":
+        zz_values = np.linspace(args.zz_min, args.zz_max, args.zz_count)
+        if len(zz_values) == 0:
+            raise ValueError("No zz values selected.")
+
+        print(f"Sweeping zz over {zz_values[0]:.5f} to {zz_values[-1]:.5f} in {len(zz_values)} steps")
+        params = dict(
+            l_values=list(l_values),
+            coupling_min=float(zz_values[0]),
+            coupling_max=float(zz_values[-1]),
+            coupling_count=int(len(zz_values)),
+            boundary=args.boundary,
+            perturbation=zz_spec.cache_tag,
+        )
+        params = cache_params_with_inv_sector(params, args.inv_sector)
+        cache_path = make_cache_path(zz_spec.cache_tag, params)
+        if (not args.force) and cache_path.exists():
+            print(f"Loading cached zz results from {cache_path}")
+            results = load_hxz_results(cache_path)
+        else:
+            results = compute_pxp_agp_series(
+                l_values,
+                coupling_values=zz_values,
+                symmetry=symmetry,
+                boundary=args.boundary,
+                backend=args.backend,
+                perturbation_kind=zz_spec.kind,
+            )
+            save_hxz_results(results, cache_path)
+            print(f"Saved zz cache to {cache_path}")
+
+        plot_pxp_agp_series(
+            results,
+            args.zz_output,
+            perturbation_label=zz_spec.display_name,
+            coupling_label=zz_spec.coupling_label,
+        )
+        log_output = args.zz_output.parent / f"{args.zz_output.stem}_fit{args.zz_output.suffix}"
+        plot_pxp_agp_normalized_log_series(
+            results,
+            log_output,
+            perturbation_label=zz_spec.display_name,
+            coupling_label=zz_spec.coupling_label,
         )
     elif args.mode == "size":
         print(f"Computing PXP AGP norm versus system size for hxz={args.hxz_fixed:.5f} and L = {l_values}")
