@@ -9,6 +9,7 @@ import numpy as np
 from pxp_agp_common import (
     FIG_DIR,
     cache_params_with_inv_sector,
+    cache_params_with_base,
     fig_output_path,
     get_perturbation_spec,
     hxz_shard_cache_path,
@@ -65,6 +66,7 @@ def parse_args() -> argparse.Namespace:
         default="agp",
         help="Quantity to compute in 1d mode.",
     )
+    parser.add_argument("--nopxp", action="store_false", dest="include_base", help="Disable PXP base term in calculations.")
     parser.add_argument("--l-values", type=int, nargs="+", default=[10, 12, 14, 16], help="System sizes to use.")
     parser.add_argument("--hxz-fixed", type=float, default=0.0, help="Fixed hxz value for size-scaling mode.")
     parser.add_argument("--hxz-min", type=float, default=0.0, help="Minimum hxz value in the sweep.")
@@ -199,6 +201,7 @@ def _run_generic_1d_sweep(
     coupling_count: int,
     calc: str,
     output_path: Path | None,
+    include_base: bool = True, 
 ) -> None:
     spec = get_perturbation_spec(operator_name)
     coupling_values = np.linspace(coupling_min, coupling_max, coupling_count)
@@ -223,6 +226,7 @@ def _run_generic_1d_sweep(
         calc=calc,
     )
     params = cache_params_with_inv_sector(params, inv_sector)
+    params = cache_params_with_base(params, include_base)
     cache_path = make_cache_path(f"{spec.cache_tag}_{calc}", params)
     if (not force) and cache_path.exists():
         print(f"Loading cached {spec.cache_tag} {calc} results from {cache_path}")
@@ -236,6 +240,7 @@ def _run_generic_1d_sweep(
                 boundary=boundary,
                 backend=backend,
                 perturbation_kind=spec.kind,
+                include_base=include_base,
             )
         elif calc == "spacing":
             results = compute_pxp_spacing_series(
@@ -245,6 +250,7 @@ def _run_generic_1d_sweep(
                 boundary=boundary,
                 backend=backend,
                 perturbation_kind=spec.kind,
+                include_base=include_base,
             )
         else:
             raise ValueError(f"Unsupported 1d calc: {calc}")
@@ -315,6 +321,7 @@ def main() -> None:
             coupling_count=args.coupling_count,
             calc=args.calc,
             output_path=output_path,
+            include_base=args.include_base,
         )
         return
 

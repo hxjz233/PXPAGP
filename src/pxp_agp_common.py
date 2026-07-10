@@ -176,8 +176,16 @@ def build_model_term_lists(
     boundary: str,
     perturbation_kind: str,
     coupling: float,
+    include_base: bool = True,
 ) -> list[tuple[str, list[list[float]]]]:
-    static = build_base_term_lists(l)
+    """Build the list of static term specs for the full model.
+
+    If ``include_base`` is False, the base PXP term lists are omitted and
+    only the perturbation-term lists (scaled by ``coupling``) are returned.
+    """
+    static: list[tuple[str, list[list[float]]]] = []
+    if include_base:
+        static = build_base_term_lists(l)
     static.extend(build_perturbation_term_lists(l, boundary, perturbation_kind, coupling=coupling))
     return static
 
@@ -204,8 +212,15 @@ def build_model_hamiltonian_dense(
     perturbation_kind: str,
     coupling: float,
     symmetry: tuple,
+    include_base: bool = True,
 ) -> np.ndarray:
-    static = build_model_term_lists(l, boundary, perturbation_kind, coupling)
+    """Build the dense Hamiltonian for the model.
+
+    The ``include_base`` flag controls whether the base PXP term lists are
+    included. When False, the Hamiltonian contains only the perturbation
+    operator terms (scaled by ``coupling``), but uses the same basis.
+    """
+    static = build_model_term_lists(l, boundary, perturbation_kind, coupling, include_base=include_base)
     dtype = np.complex128 if _requires_complex_dtype(boundary, symmetry) else np.float64
     hamiltonian_dense = hamiltonian(
         [[op_name, term_list] for op_name, term_list in static],
@@ -353,6 +368,14 @@ def cache_params_with_inv_sector(params: dict, inv_sector: int | None) -> dict:
         return params
     merged = dict(params)
     merged["inv_sector"] = int(inv_sector)
+    return merged
+
+
+def cache_params_with_base(params: dict, include_base: bool) -> dict:
+    if include_base:
+        return params
+    merged = dict(params)
+    merged["include_base"] = False
     return merged
 
 

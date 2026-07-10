@@ -175,6 +175,7 @@ def _run_perturbation_series(
     perturbation_kind: str,
     value_fn: Callable[[np.ndarray, np.ndarray, float, int, int, str], float],
     series_name: str,
+    include_base: bool = True,
 ) -> dict[int, list[tuple[float, float]]]:
     results: dict[int, list[tuple[float, float]]] = {l: [] for l in l_values}
     total_start = time.perf_counter()
@@ -197,6 +198,7 @@ def _run_perturbation_series(
                 perturbation_kind,
                 coupling,
                 symmetry,
+                include_base=include_base,
             )
 
             value = value_fn(h_base_dense, context.dh_dense, context.mu, context.basis_dim, l, backend)
@@ -219,6 +221,7 @@ def compute_pxp_agp_series(
     boundary: str = "OBC",
     backend: str = "cpu",
     perturbation_kind: str = "pxpz",
+    include_base: bool = True,
 ) -> dict[int, list[tuple[float, float]]]:
     def _evaluate_agp(
         h_base_dense: np.ndarray,
@@ -240,6 +243,7 @@ def compute_pxp_agp_series(
         perturbation_kind=perturbation_kind,
         value_fn=_evaluate_agp,
         series_name="AGP",
+        include_base=include_base,
     )
 
 
@@ -250,6 +254,7 @@ def compute_pxp_chi_typ_series(
     boundary: str = "OBC",
     backend: str = "cpu",
     perturbation_kind: str = "pxpz",
+    include_base: bool = True,
 ) -> dict[int, list[tuple[float, float]]]:
     def _evaluate_chi_typ(
         h_base_dense: np.ndarray,
@@ -271,6 +276,7 @@ def compute_pxp_chi_typ_series(
         perturbation_kind=perturbation_kind,
         value_fn=_evaluate_chi_typ,
         series_name="chi_typ",
+        include_base=include_base,
     )
 
 
@@ -281,6 +287,7 @@ def compute_pxp_spacing_series(
     boundary: str = "OBC",
     backend: str = "cpu",
     perturbation_kind: str = "pxpz",
+    include_base: bool = True,
 ) -> dict[int, list[tuple[float, float]]]:
     def _evaluate_spacing(
         h_base_dense: np.ndarray,
@@ -302,6 +309,7 @@ def compute_pxp_spacing_series(
         perturbation_kind=perturbation_kind,
         value_fn=_evaluate_spacing,
         series_name="spacing",
+        include_base=include_base,
     )
 
 
