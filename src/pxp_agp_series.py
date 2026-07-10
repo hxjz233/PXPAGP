@@ -200,7 +200,8 @@ def _run_perturbation_series(
                 symmetry,
                 include_base=include_base,
             )
-
+            # print(f"** step start: L={l:2d}, {spec.coupling_name}={coupling: .5f}")
+            # print(h_base_dense)
             value = value_fn(h_base_dense, context.dh_dense, context.mu, context.basis_dim, l, backend)
             results[l].append((coupling, value))
             print(
